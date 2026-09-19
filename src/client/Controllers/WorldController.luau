@@ -271,6 +271,38 @@ function WorldController:_clear(folder)
 	end
 end
 
+function WorldController:SetSelected(selectedIds)
+	self._selectedIds = selectedIds or {}
+	self:_updateSelectionHighlights()
+end
+
+function WorldController:_updateSelectionHighlights()
+	if not self._display then
+		return
+	end
+	for _, child in self._display:GetChildren() do
+		local mutantId = child:GetAttribute("MutantId")
+		local isSelected = mutantId and table.find(self._selectedIds or {}, mutantId) ~= nil
+		local existing = child:FindFirstChild("SelectionHighlight")
+		if isSelected then
+			if not existing then
+				local highlight = Instance.new("Highlight")
+				highlight.Name = "SelectionHighlight"
+				highlight.FillColor = COLORS.Cyan
+				highlight.FillTransparency = 0.65
+				highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+				highlight.OutlineTransparency = 0.1
+				highlight.Adornee = child
+				highlight.Parent = child
+			end
+		else
+			if existing then
+				existing:Destroy()
+			end
+		end
+	end
+end
+
 function WorldController:SetState(snapshot)
 	if not self._display or not self._battleFolder then
 		return
@@ -281,6 +313,7 @@ function WorldController:SetState(snapshot)
 			makeBlob(self._display, mutant, CFrame.new(-13 + (index - 1) * 5.1, 0.5, 3))
 		end
 	end
+	self:_updateSelectionHighlights()
 
 	self._battle = snapshot.Battle
 	self:_clear(self._battleFolder)
@@ -309,14 +342,29 @@ function WorldController:_animateBattle()
 	local duration = math.max(0.1, self._battle.EndsAt - self._battle.StartedAt)
 	local progress = math.clamp((now - self._battle.StartedAt) / duration, 0, 1)
 	local pulse = math.sin(now * 8)
+	local lunge = math.max(0, math.sin(now * 5))
+
 	if dummy and dummy.PrimaryPart then
 		dummy:PivotTo(
 			CFrame.new(3, 2.2 + math.max(0, pulse) * 0.12, 8)
 				* CFrame.Angles(0, 0, pulse * 0.06 * (1 - progress))
 		)
+		local flash = dummy:FindFirstChild("CombatFlash")
+		if lunge > 0.82 then
+			if not flash then
+				local h = Instance.new("Highlight")
+				h.Name = "CombatFlash"
+				h.FillColor = Color3.fromRGB(255, 80, 80)
+				h.FillTransparency = 0.35
+				h.OutlineTransparency = 0.5
+				h.Adornee = dummy
+				h.Parent = dummy
+			end
+		elseif flash then
+			flash:Destroy()
+		end
 	end
 	if fighter and fighter.PrimaryPart then
-		local lunge = math.max(0, math.sin(now * 5))
 		fighter:PivotTo(CFrame.new(-3 + lunge * 2, 2 + lunge * 0.25, 8))
 	end
 end

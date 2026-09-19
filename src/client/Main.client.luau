@@ -15,7 +15,6 @@ local network
 local world = WorldController.new()
 world:Start()
 
-local ui
 ui = UIController.new({
 	OnAction = function(action, payload)
 		if network and not network:Request(action, payload) then
@@ -26,6 +25,9 @@ ui = UIController.new({
 		if network then
 			network:RetryInitial()
 		end
+	end,
+	OnSelectionChanged = function(selectedIds)
+		world:SetSelected(selectedIds)
 	end,
 }, GameConfig)
 

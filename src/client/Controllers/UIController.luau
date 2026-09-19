@@ -20,6 +20,15 @@ local COLORS = {
 	Disabled = Color3.fromRGB(69, 78, 84),
 }
 
+local SOUNDS = {
+	Click = "rbxassetid://6895079853",
+	Create = "rbxassetid://9114223170",
+	Merge = "rbxassetid://9065360699",
+	Battle = "rbxassetid://9114221580",
+	Victory = "rbxassetid://9065360699",
+	Error = "rbxassetid://9065360408",
+}
+
 local ERROR_TEXT = {
 	NOT_READY = "The lab is still loading. Try again in a moment.",
 	RATE_LIMITED = "Too many experiments at once. Slow down.",
@@ -96,8 +105,24 @@ function UIController.new(callbacks, gameConfig)
 	self._selected = {}
 	self._connections = {}
 	self._toastGeneration = 0
+	self._minimized = false
 	self:_build()
 	return self
+end
+
+function UIController:_playSound(soundName)
+	local soundId = SOUNDS[soundName]
+	if not soundId then
+		return
+	end
+	pcall(function()
+		local sound = Instance.new("Sound")
+		sound.SoundId = soundId
+		sound.Volume = 0.5
+		sound.Parent = game:GetService("SoundService")
+		sound.PlayOnRemove = true
+		sound:Destroy()
+	end)
 end
 
 function UIController:_build()
@@ -117,6 +142,7 @@ function UIController:_build()
 	panel.Size = UDim2.fromOffset(390, 620)
 	panel.BackgroundColor3 = COLORS.Panel
 	panel.BackgroundTransparency = 0.04
+	panel.ClipsDescendants = true
 	panel.Parent = screen
 	addCorner(panel, 16)
 	addStroke(panel, COLORS.Cyan, 1, 0.65)
@@ -130,12 +156,12 @@ function UIController:_build()
 	header.Parent = panel
 
 	local title =
-		makeLabel(header, "MUTANT LAB", UDim2.new(0.58, 0, 0, 28), COLORS.Text, Enum.Font.GothamBlack)
-	title.TextSize = 21
+		makeLabel(header, "MUTANT LAB", UDim2.new(0.52, 0, 0, 28), COLORS.Text, Enum.Font.GothamBlack)
+	title.TextSize = 20
 	local subtitle = makeLabel(
 		header,
 		"BIO RESEARCH TERMINAL",
-		UDim2.new(0.65, 0, 0, 20),
+		UDim2.new(0.52, 0, 0, 20),
 		COLORS.Muted,
 		Enum.Font.GothamMedium
 	)
@@ -143,11 +169,26 @@ function UIController:_build()
 	subtitle.TextSize = 10
 	subtitle.TextTransparency = 0.1
 
-	local balance = makeLabel(header, "◉  --", UDim2.new(0.42, 0, 0, 36), COLORS.Lime, Enum.Font.GothamBold)
-	balance.Position = UDim2.new(0.58, 0, 0, 4)
+	local balance = makeLabel(header, "◉  --", UDim2.new(0.32, 0, 0, 36), COLORS.Lime, Enum.Font.GothamBold)
+	balance.Position = UDim2.new(0.52, 0, 0, 4)
 	balance.TextXAlignment = Enum.TextXAlignment.Right
-	balance.TextSize = 18
+	balance.TextSize = 17
 	self._balance = balance
+
+	local toggleBtn = Instance.new("TextButton")
+	toggleBtn.Name = "ToggleMinimize"
+	toggleBtn.AnchorPoint = Vector2.new(1, 0.5)
+	toggleBtn.Position = UDim2.new(1, 0, 0.5, 0)
+	toggleBtn.Size = UDim2.fromOffset(34, 34)
+	toggleBtn.BackgroundColor3 = COLORS.PanelSoft
+	toggleBtn.Text = "▲"
+	toggleBtn.TextColor3 = COLORS.Cyan
+	toggleBtn.Font = Enum.Font.GothamBold
+	toggleBtn.TextSize = 14
+	toggleBtn.Parent = header
+	addCorner(toggleBtn, 8)
+	addStroke(toggleBtn, COLORS.Cyan, 1, 0.5)
+	self._toggleBtn = toggleBtn
 
 	local scroll = Instance.new("ScrollingFrame")
 	scroll.Name = "Content"
@@ -243,6 +284,7 @@ function UIController:_build()
 	create.LayoutOrder = 7
 	create.Activated:Connect(function()
 		if not self._busy and self._state then
+			self:_playSound("Click")
 			self._callbacks.OnAction("CreateBlob", nil)
 		end
 	end)
@@ -252,6 +294,7 @@ function UIController:_build()
 	merge.LayoutOrder = 8
 	merge.Activated:Connect(function()
 		if not self._busy and #self._selected == 2 then
+			self:_playSound("Click")
 			self._callbacks.OnAction("Merge", { FirstId = self._selected[1], SecondId = self._selected[2] })
 		end
 	end)
@@ -261,6 +304,7 @@ function UIController:_build()
 	battle.LayoutOrder = 9
 	battle.Activated:Connect(function()
 		if not self._busy and #self._selected == 1 then
+			self:_playSound("Click")
 			self._callbacks.OnAction("StartBattle", { MutantId = self._selected[1] })
 		end
 	end)
@@ -309,20 +353,35 @@ function UIController:_build()
 			return
 		end
 		local viewport = camera.ViewportSize
-		if viewport.X < 600 and viewport.Y > viewport.X then
+		local isLandscape = viewport.X >= viewport.Y
+
+		if not isLandscape and viewport.X < 600 then
 			panel.AnchorPoint = Vector2.new(1, 1)
 			panel.Position = UDim2.new(1, -10, 1, -10)
-			panel.Size = UDim2.new(1, -20, 0.58, 0)
+			panel.Size = if self._minimized then UDim2.new(1, -20, 0, 78) else UDim2.new(1, -20, 0.58, 0)
+		elseif isLandscape and viewport.Y < 480 then
+			local width = math.floor(math.clamp(viewport.X * 0.45, 270, 340))
+			panel.AnchorPoint = Vector2.new(1, 0)
+			panel.Position = UDim2.new(1, -10, 0, 10)
+			panel.Size = if self._minimized then UDim2.new(0, width, 0, 78) else UDim2.new(0, width, 1, -20)
 		else
 			local width = if viewport.X < 700
-				then math.floor(math.clamp(viewport.X * 0.68, 300, 350))
+				then math.floor(math.clamp(viewport.X * 0.65, 300, 350))
 				else math.floor(math.clamp(viewport.X * 0.34, 350, 420))
 			panel.AnchorPoint = Vector2.new(1, 0)
 			panel.Position = UDim2.new(1, -10, 0, 10)
-			panel.Size = UDim2.new(0, width, 1, -20)
+			panel.Size = if self._minimized then UDim2.new(0, width, 0, 78) else UDim2.new(0, width, 1, -20)
 		end
 	end
 	resize()
+
+	self._toggleBtn.Activated:Connect(function()
+		self._minimized = not self._minimized
+		self._scroll.Visible = not self._minimized
+		self._toggleBtn.Text = if self._minimized then "▼" else "▲"
+		self:_playSound("Click")
+		resize()
+	end)
 	if workspace.CurrentCamera then
 		table.insert(
 			self._connections,
@@ -417,13 +476,19 @@ function UIController:_toggleSelected(mutantId)
 	local index = table.find(self._selected, mutantId)
 	if index then
 		table.remove(self._selected, index)
+		self:_playSound("Click")
 	elseif #self._selected < 2 then
 		table.insert(self._selected, mutantId)
+		self:_playSound("Click")
 	else
 		self:ShowToast("You can select at most two specimens.", COLORS.Orange)
+		self:_playSound("Error")
 	end
 	self:_renderInventory()
 	self:_refreshControls()
+	if self._callbacks.OnSelectionChanged then
+		self._callbacks.OnSelectionChanged(self._selected)
+	end
 end
 
 function UIController:_renderInventory()
@@ -473,12 +538,21 @@ function UIController:_renderInventory()
 		local name = makeLabel(
 			selectButton,
 			if mutant.Type == "ToxicBlob" then "TOXIC BLOB" else "BLOB",
-			UDim2.new(1, -16, 0, 28),
+			UDim2.new(0.5, 0, 0, 28),
 			if mutant.Type == "ToxicBlob" then COLORS.Lime else COLORS.Cyan,
 			Enum.Font.GothamBold
 		)
 		name.Position = UDim2.fromOffset(12, 8)
 		name.TextSize = 15
+
+		local badgeText = if selected then "SELECTED  ✓" else "TAP TO SELECT"
+		local badgeColor = if selected then COLORS.Lime else COLORS.Muted
+		local badge =
+			makeLabel(selectButton, badgeText, UDim2.new(0.48, 0, 0, 18), badgeColor, Enum.Font.GothamBold)
+		badge.Position = UDim2.new(0.52, -6, 0, 12)
+		badge.TextXAlignment = Enum.TextXAlignment.Right
+		badge.TextSize = 10
+
 		local detail = makeLabel(
 			selectButton,
 			string.format("Tier %s  •  Level %s", tostring(mutant.Tier), tostring(mutant.Level)),
@@ -512,6 +586,7 @@ function UIController:_renderInventory()
 		release.TextTransparency = if canRelease then 0 else 0.65
 		release.Activated:Connect(function()
 			if canRelease and not self._busy then
+				self:_playSound("Click")
 				self:_showRelease(mutant.Id)
 			end
 		end)
@@ -524,19 +599,19 @@ function UIController:_tutorialHint()
 	end
 	local tutorial = self._state.Tutorial or {}
 	if not tutorial.FirstBlobCreated then
-		return "Step 1: create your first free Blob."
+		return "Step 1: Click CREATE BLOB to synthesize your first free specimen."
 	elseif not tutorial.FirstMergeCompleted then
 		if (tutorial.FreeBlobsClaimed or 0) < self._gameConfig.FreeTutorialBlobs then
-			return "Step 2: create one more free Blob, then select both."
+			return "Step 2: Click CREATE BLOB to synthesize your second specimen."
 		end
-		return "Step 2: select two Blobs and merge them into a Toxic Blob."
+		return "Step 2: Click BOTH Blob cards above to select them, then press MERGE SELECTED."
 	elseif not tutorial.TutorialCompleted then
 		if type(self._state.Battle) == "table" then
-			return "Training in progress. Watch the combat dummy!"
+			return "Training in progress! Watch the combat dummy in the chamber."
 		end
-		return "Step 3: select the Toxic Blob and start training."
+		return "Step 3: Click your Toxic Blob card to select it, then click START TRAINING."
 	end
-	return "Tutorial complete. Grow your collection and train your mutants."
+	return "Tutorial complete! Grow your collection, synthesize mutations and train mutants."
 end
 
 function UIController:_pruneSelection()
@@ -553,6 +628,9 @@ function UIController:_pruneSelection()
 		end
 	end
 	self._selected = valid
+	if self._callbacks.OnSelectionChanged then
+		self._callbacks.OnSelectionChanged(self._selected)
+	end
 end
 
 function UIController:SetState(snapshot)
@@ -640,14 +718,25 @@ function UIController:ShowResult(action, ok, code)
 			StartBattle = "Training started.",
 			ReleaseMutant = "Specimen released. No refund was issued.",
 		}
+		if action == "CreateBlob" then
+			self:_playSound("Create")
+		elseif action == "Merge" then
+			self:_playSound("Merge")
+		elseif action == "StartBattle" then
+			self:_playSound("Battle")
+		else
+			self:_playSound("Click")
+		end
 		self:ShowToast(messages[action] or "Experiment complete.", COLORS.Cyan)
 		return
 	end
+	self:_playSound("Error")
 	self:ShowToast(ERROR_TEXT[code] or ("Request failed: " .. tostring(code)), COLORS.Red)
 end
 
 function UIController:ShowNotice(notice)
 	if notice.Code == "BATTLE_COMPLETE" then
+		self:_playSound("Victory")
 		self:ShowToast(
 			string.format("Training complete! +%s BioCoins", tostring(notice.Reward or 0)),
 			COLORS.Lime
