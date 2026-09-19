@@ -51,10 +51,57 @@ local function labelOn(parent, text, offset)
 	corner.Parent = textLabel
 end
 
-local function makeBlob(parent, mutant, at)
+local function spawnDamagePopup(parent, text, position)
+	local popupPart = Instance.new("Part")
+	popupPart.Name = "DamagePopup"
+	popupPart.Transparency = 1
+	popupPart.CanCollide = false
+	popupPart.CanQuery = false
+	popupPart.CanTouch = false
+	popupPart.Anchored = true
+	popupPart.CFrame = CFrame.new(position)
+	popupPart.Parent = parent
+
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromOffset(120, 36)
+	gui.AlwaysOnTop = true
+	gui.Parent = popupPart
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = text
+	label.TextColor3 = Color3.fromRGB(255, 215, 60)
+	label.Font = Enum.Font.GothamBlack
+	label.TextScaled = true
+	label.Parent = gui
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(180, 45, 25)
+	stroke.Thickness = 2
+	stroke.Parent = label
+
+	local startClock = os.clock()
+	local conn
+	conn = RunService.RenderStepped:Connect(function()
+		local elapsed = os.clock() - startClock
+		if elapsed >= 0.75 then
+			conn:Disconnect()
+			popupPart:Destroy()
+			return
+		end
+		popupPart.CFrame = CFrame.new(position + Vector3.new(0, elapsed * 3.8, 0))
+		local alpha = elapsed / 0.75
+		label.TextTransparency = alpha
+		stroke.Transparency = alpha
+	end)
+end
+
+local function makeBlob(parent, mutant, at, order)
 	local model = Instance.new("Model")
 	model.Name = tostring(mutant.Id)
 	model:SetAttribute("MutantId", mutant.Id)
+	model:SetAttribute("Order", order or 1)
 	local toxic = mutant.Type == "ToxicBlob"
 	local bodyColor = if toxic then COLORS.Toxic else COLORS.Cyan
 	local bodySize = if toxic then Vector3.new(3.5, 2.8, 3.5) else Vector3.new(3.1, 2.5, 3.1)
@@ -62,10 +109,17 @@ local function makeBlob(parent, mutant, at)
 	body.Shape = Enum.PartType.Ball
 	model.PrimaryPart = body
 
-	for _, x in { -0.58, 0.58 } do
+	model:SetAttribute("BaseX", body.Position.X)
+	model:SetAttribute("BaseY", body.Position.Y)
+	model:SetAttribute("BaseZ", body.Position.Z)
+	model:SetAttribute("BaseSizeX", bodySize.X)
+	model:SetAttribute("BaseSizeY", bodySize.Y)
+	model:SetAttribute("BaseSizeZ", bodySize.Z)
+
+	for index, x in { -0.58, 0.58 } do
 		local eye = part(
 			model,
-			"Eye",
+			"Eye_" .. tostring(index),
 			Vector3.new(0.5, 0.65, 0.28),
 			at * CFrame.new(x, 1.85, -1.42),
 			Color3.fromRGB(236, 255, 250),
@@ -74,7 +128,7 @@ local function makeBlob(parent, mutant, at)
 		eye.Shape = Enum.PartType.Ball
 		local pupil = part(
 			model,
-			"Pupil",
+			"Pupil_" .. tostring(index),
 			Vector3.new(0.2, 0.28, 0.15),
 			at * CFrame.new(x, 1.82, -1.64),
 			COLORS.Ink,
@@ -142,7 +196,41 @@ local function makeDummy(parent)
 			Enum.Material.Wood
 		)
 	end
-	labelOn(head, "TRAINING DUMMY", Vector3.new(0, 1.8, 0))
+
+	local hpGui = Instance.new("BillboardGui")
+	hpGui.Name = "DummyHP"
+	hpGui.Size = UDim2.fromOffset(160, 44)
+	hpGui.StudsOffset = Vector3.new(0, 2.4, 0)
+	hpGui.AlwaysOnTop = true
+	hpGui.Parent = head
+
+	local hpBg = Instance.new("Frame")
+	hpBg.Name = "Background"
+	hpBg.Size = UDim2.new(1, 0, 0, 10)
+	hpBg.Position = UDim2.new(0, 0, 0, 24)
+	hpBg.BackgroundColor3 = Color3.fromRGB(25, 32, 38)
+	hpBg.BorderSizePixel = 0
+	hpBg.Parent = hpGui
+	addCorner(hpBg, 5)
+
+	local hpFill = Instance.new("Frame")
+	hpFill.Name = "Fill"
+	hpFill.Size = UDim2.new(1, 0, 1, 0)
+	hpFill.BackgroundColor3 = Color3.fromRGB(60, 230, 110)
+	hpFill.BorderSizePixel = 0
+	hpFill.Parent = hpBg
+	addCorner(hpFill, 5)
+
+	local hpLabel = Instance.new("TextLabel")
+	hpLabel.Name = "Label"
+	hpLabel.Size = UDim2.new(1, 0, 0, 18)
+	hpLabel.BackgroundTransparency = 1
+	hpLabel.Text = "TARGET DUMMY • 100%"
+	hpLabel.TextColor3 = Color3.fromRGB(240, 245, 250)
+	hpLabel.Font = Enum.Font.GothamBold
+	hpLabel.TextSize = 12
+	hpLabel.Parent = hpGui
+
 	model.Parent = parent
 	return model
 end
@@ -158,6 +246,8 @@ function WorldController.new()
 	self._previousCameraType = nil
 	self._previousCameraSubject = nil
 	self._previousCameraCFrame = nil
+	self._lastDamagePopupTime = 0
+	self._lightingEffects = {}
 	return self
 end
 
@@ -166,6 +256,26 @@ function WorldController:Start()
 	root.Name = "MutantLabClient_" .. tostring(Players.LocalPlayer.UserId)
 	root.Parent = workspace
 	self._root = root
+
+	local Lighting = game:GetService("Lighting")
+	self._lightingEffects = {}
+	pcall(function()
+		local bloom = Instance.new("BloomEffect")
+		bloom.Name = "MutantLabBloom"
+		bloom.Intensity = 0.85
+		bloom.Size = 24
+		bloom.Threshold = 1.1
+		bloom.Parent = Lighting
+		table.insert(self._lightingEffects, bloom)
+
+		local cc = Instance.new("ColorCorrectionEffect")
+		cc.Name = "MutantLabColor"
+		cc.Saturation = 0.18
+		cc.Contrast = 0.12
+		cc.Brightness = 0.02
+		cc.Parent = Lighting
+		table.insert(self._lightingEffects, cc)
+	end)
 
 	local architecture = Instance.new("Folder")
 	architecture.Name = "Architecture"
@@ -204,15 +314,40 @@ function WorldController:Start()
 			Color3.fromRGB(34, 46, 54),
 			Enum.Material.Metal
 		)
-		part(
+		local glowColor = if index % 2 == 0 then COLORS.Purple else COLORS.Cyan
+		local padGlow = part(
 			architecture,
 			"PadGlow",
 			Vector3.new(3.5, 0.12, 3.5),
 			CFrame.new(x, 0.51, 3),
-			if index % 2 == 0 then COLORS.Purple else COLORS.Cyan,
+			glowColor,
 			Enum.Material.Neon
 		)
+		local padLight = Instance.new("PointLight")
+		padLight.Name = "PadLight"
+		padLight.Color = glowColor
+		padLight.Range = 10
+		padLight.Brightness = 1.8
+		padLight.Parent = padGlow
 	end
+
+	local chamberCeiling = part(
+		architecture,
+		"ChamberCeilingLight",
+		Vector3.new(3, 0.4, 3),
+		CFrame.new(0, 11, 8),
+		Color3.fromRGB(255, 240, 200),
+		Enum.Material.Neon
+	)
+	local chamberSpot = Instance.new("SpotLight")
+	chamberSpot.Name = "ChamberSpot"
+	chamberSpot.Color = Color3.fromRGB(255, 230, 180)
+	chamberSpot.Range = 25
+	chamberSpot.Angle = 65
+	chamberSpot.Brightness = 2.2
+	chamberSpot.Face = Enum.NormalId.Bottom
+	chamberSpot.Parent = chamberCeiling
+
 	for _, x in { -14, 13 } do
 		local tube = part(
 			architecture,
@@ -261,6 +396,7 @@ function WorldController:Start()
 	end
 
 	self._renderConnection = RunService.RenderStepped:Connect(function()
+		self:_animateBlobs()
 		self:_animateBattle()
 	end)
 end
@@ -310,7 +446,7 @@ function WorldController:SetState(snapshot)
 	self:_clear(self._display)
 	for index, mutant in snapshot.Mutants or {} do
 		if index <= 6 then
-			makeBlob(self._display, mutant, CFrame.new(-13 + (index - 1) * 5.1, 0.5, 3))
+			makeBlob(self._display, mutant, CFrame.new(-13 + (index - 1) * 5.1, 0.5, 3), index)
 		end
 	end
 	self:_updateSelectionHighlights()
@@ -327,7 +463,47 @@ function WorldController:SetState(snapshot)
 			end
 		end
 		if fighter then
-			makeBlob(self._battleFolder, fighter, CFrame.new(-3, 0.5, 8))
+			makeBlob(self._battleFolder, fighter, CFrame.new(-3, 0.5, 8), 1)
+		end
+	end
+end
+
+function WorldController:_animateBlobs()
+	if not self._display then
+		return
+	end
+	local now = workspace:GetServerTimeNow()
+	for _, child in self._display:GetChildren() do
+		local body = child:FindFirstChild("Body")
+		if body and body:IsA("BasePart") then
+			local order = child:GetAttribute("Order") or 1
+			local baseX = child:GetAttribute("BaseX")
+			local baseY = child:GetAttribute("BaseY")
+			local baseZ = child:GetAttribute("BaseZ")
+			local sizeX = child:GetAttribute("BaseSizeX")
+			local sizeY = child:GetAttribute("BaseSizeY")
+			local sizeZ = child:GetAttribute("BaseSizeZ")
+
+			if baseX and baseY and sizeX then
+				local wave = math.sin(now * 3 + order * 0.9)
+				local squashY = 1 + wave * 0.08
+				local stretchXZ = 1 - wave * 0.04
+				body.Size = Vector3.new(sizeX * stretchXZ, sizeY * squashY, sizeZ * stretchXZ)
+				body.Position = Vector3.new(baseX, baseY + wave * 0.06, baseZ)
+			end
+
+			local blinkTimer = (now + order * 1.3) % 3.8
+			local isBlink = blinkTimer < 0.14
+			for _, eyeIndex in { 1, 2 } do
+				local eye = child:FindFirstChild("Eye_" .. tostring(eyeIndex))
+				local pupil = child:FindFirstChild("Pupil_" .. tostring(eyeIndex))
+				if eye and eye:IsA("BasePart") then
+					eye.Size = if isBlink then Vector3.new(0.5, 0.08, 0.28) else Vector3.new(0.5, 0.65, 0.28)
+				end
+				if pupil and pupil:IsA("BasePart") then
+					pupil.Transparency = if isBlink then 1 else 0
+				end
+			end
 		end
 	end
 end
@@ -349,16 +525,36 @@ function WorldController:_animateBattle()
 			CFrame.new(3, 2.2 + math.max(0, pulse) * 0.12, 8)
 				* CFrame.Angles(0, 0, pulse * 0.06 * (1 - progress))
 		)
+
+		local hpGui = dummy:FindFirstChild("Head") and dummy.Head:FindFirstChild("DummyHP")
+		if hpGui then
+			local hpPercent = math.clamp(1 - progress, 0, 1)
+			local fill = hpGui:FindFirstChild("Background") and hpGui.Background:FindFirstChild("Fill")
+			local label = hpGui:FindFirstChild("Label")
+			if fill then
+				fill.Size = UDim2.new(hpPercent, 0, 1, 0)
+				fill.BackgroundColor3 = Color3.fromHSV(hpPercent * 0.33, 0.85, 0.95)
+			end
+			if label then
+				label.Text = string.format("TARGET DUMMY • %d%%", math.ceil(hpPercent * 100))
+			end
+		end
+
 		local flash = dummy:FindFirstChild("CombatFlash")
-		if lunge > 0.82 then
+		if lunge > 0.85 then
 			if not flash then
 				local h = Instance.new("Highlight")
 				h.Name = "CombatFlash"
-				h.FillColor = Color3.fromRGB(255, 80, 80)
-				h.FillTransparency = 0.35
+				h.FillColor = Color3.fromRGB(255, 75, 75)
+				h.FillTransparency = 0.3
 				h.OutlineTransparency = 0.5
 				h.Adornee = dummy
 				h.Parent = dummy
+			end
+			if now - self._lastDamagePopupTime > 0.7 then
+				self._lastDamagePopupTime = now
+				local reward = (self._battle and self._battle.Reward) or 15
+				spawnDamagePopup(self._battleFolder, string.format("-%d", reward), Vector3.new(3, 5.2, 8))
 			end
 		elseif flash then
 			flash:Destroy()
@@ -373,6 +569,14 @@ function WorldController:Stop()
 	if self._renderConnection then
 		self._renderConnection:Disconnect()
 		self._renderConnection = nil
+	end
+	if self._lightingEffects then
+		for _, effect in self._lightingEffects do
+			if effect and effect.Parent then
+				effect:Destroy()
+			end
+		end
+		self._lightingEffects = nil
 	end
 	if self._camera and self._camera.Parent then
 		self._camera.CameraType = self._previousCameraType or Enum.CameraType.Custom
