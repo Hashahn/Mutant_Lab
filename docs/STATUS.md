@@ -39,11 +39,22 @@
   - Построена твёрдая архитектура лаборатории (`CanCollide = true`): монолитный пол (`Floor` 48x44 стада), защитный периметр стен (`BackWall`, `FrontWall`, `LeftWall`, `RightWall`) и постаменты с ареной, по которым можно свободно ходить.
   - Добавлен `SpawnLocation` в `default.project.json`, гарантирующий спавн игрока на полу лаборатории (`[-3, 1, -10]`).
   - Камера переведена в полноценный режим от третьего лица (`Enum.CameraType.Custom` с фокусом на `Humanoid`), позволяя свободно осматривать лабораторию, перемещаться на WASD и наблюдать за мутантами в 3D.
+- Эволюция Tier 3: Plasma Blob (синтез 2x Toxic Blob -> Plasma Blob):
+  - Конфигурация мутанта (`src/shared/Config/MutantConfig.luau`): добавлен `PlasmaBlob` (Tier = 3, BasePower = 60, BattleReward = 85 BioCoins).
+  - Чистые серверные правила (`src/server/Domain/GameRules.luau` & `GameState.luau`):
+    - Слияние: разрешено объединение двух `ToxicBlob` с созданием `PlasmaBlob`.
+    - Валидация профиля: учёт единиц мутантов расширен (Tier 1 = 1, Tier 2 = 2, Tier 3 = 4).
+    - Завершение боя: бой с `PlasmaBlob` также засчитывает прохождение туториала.
+  - Автотесты доменной логики (`tests/domain.spec.luau`): 69 проверок (включая синтез 2x Toxic Blob -> Plasma Blob, валидацию инвентаря Tier 3 и награду 85 монет).
+  - Визуализация в 3D-мире (`src/client/Controllers/WorldController.luau`):
+    - 3D-модель Plasma Blob: насыщенный тёмно-фиолетовый блоб с электрическими бирюзовыми глазами, 4 плазменными рогами-излучателями (`PlasmaNode`) и парящим энергетическим нимбом (`PlasmaHalo`).
+    - Анимация синтеза: высокоэнергетический плазменный вихрь с бейджем `⚡ PLASMA BLOB SYNTHESIZED! ✨`.
+    - Боевая механика: 3 цепных удара молнией (1.2s: -85, 2.6s: -100, 4.2s: -115 фатальный взрыв), электрификация манекена `[⚡ ELECTRIFIED]`, циан/маджента вспышки и парящий овердрайв победы.
+  - Пользовательский интерфейс (`src/client/Controllers/UIController.luau`): электрик-фиолетовые карточки мутантов, обновленные плашки слияния и подсказки.
 - Выполнено форматирование StyLua всего исходного кода.
 
 ## Реально выполненные команды:
-- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1 -Format` (StyLua format + 7 Lune suites + Rojo build)
-- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1` (чистый прогон: 7/7 сьютов PASS, сборка `build/MutantLab.rbxlx` успешна)
+- `powershell -ExecutionPolicy Bypass -File ./scripts/check.ps1 -Format` (StyLua format + 7 Lune suites + Rojo build MutantLab.rbxlx, 69 domain checks PASS)
 
 ## Пройденная ручная проверка в Studio (Milestone M1 и M3):
 - Дата: 2026-09-19 | Режим: Memory | Клиентов: 1 | Ошибок в Output: 0.

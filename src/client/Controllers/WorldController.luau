@@ -250,9 +250,16 @@ local function makeBlob(parent, mutant, at, order)
 	model.Name = tostring(mutant.Id)
 	model:SetAttribute("MutantId", mutant.Id)
 	model:SetAttribute("Order", order or 1)
+	local isPlasma = mutant.Type == "PlasmaBlob"
 	local toxic = mutant.Type == "ToxicBlob"
-	local bodyColor = if toxic then COLORS.Toxic else COLORS.Cyan
-	local bodySize = if toxic then Vector3.new(3.5, 2.8, 3.5) else Vector3.new(3.1, 2.5, 3.1)
+	local bodyColor = if isPlasma
+		then Color3.fromRGB(150, 50, 255)
+		elseif toxic then COLORS.Toxic
+		else COLORS.Cyan
+	local bodySize = if isPlasma
+		then Vector3.new(3.8, 3.0, 3.8)
+		elseif toxic then Vector3.new(3.5, 2.8, 3.5)
+		else Vector3.new(3.1, 2.5, 3.1)
 	local body =
 		part(model, "Body", bodySize, at * CFrame.new(0, 1.5, 0), bodyColor, Enum.Material.SmoothPlastic)
 	body.Shape = Enum.PartType.Ball
@@ -266,12 +273,13 @@ local function makeBlob(parent, mutant, at, order)
 	model:SetAttribute("BaseSizeZ", bodySize.Z)
 
 	for index, x in { -0.58, 0.58 } do
+		local eyeColor = if isPlasma then Color3.fromRGB(120, 240, 255) else Color3.fromRGB(236, 255, 250)
 		local eye = part(
 			model,
 			"Eye_" .. tostring(index),
 			Vector3.new(0.5, 0.65, 0.28),
 			at * CFrame.new(x, 1.85, -1.42),
-			Color3.fromRGB(236, 255, 250),
+			eyeColor,
 			Enum.Material.SmoothPlastic
 		)
 		eye.Shape = Enum.PartType.Ball
@@ -302,13 +310,44 @@ local function makeBlob(parent, mutant, at, order)
 			)
 			spike.Shape = Enum.PartType.Cylinder
 		end
+	elseif isPlasma then
+		for index = 0, 3 do
+			local angle = (math.pi * 2 / 4) * index + math.pi / 4
+			local nodeCFrame = at
+				* CFrame.new(math.cos(angle) * 1.6, 2.8, math.sin(angle) * 1.6)
+				* CFrame.Angles(math.cos(angle) * 0.45, 0, -math.sin(angle) * 0.45)
+			local node = part(
+				model,
+				"PlasmaNode",
+				Vector3.new(0.45, 1.6, 0.45),
+				nodeCFrame,
+				Color3.fromRGB(110, 230, 255),
+				Enum.Material.SmoothPlastic
+			)
+			node.Shape = Enum.PartType.Cylinder
+		end
+		local halo = part(
+			model,
+			"PlasmaHalo",
+			Vector3.new(3.2, 0.12, 3.2),
+			at * CFrame.new(0, 3.6, 0),
+			Color3.fromRGB(120, 230, 255),
+			Enum.Material.SmoothPlastic
+		)
+		halo.Shape = Enum.PartType.Cylinder
+		halo.CFrame = at * CFrame.new(0, 3.6, 0) * CFrame.Angles(0, 0, math.pi / 2)
 	end
 
-	local displayName = if toxic then "TOXIC BLOB" else "BLOB"
+	local displayName = if isPlasma then "PLASMA BLOB" elseif toxic then "TOXIC BLOB" else "BLOB"
+	local labelColor = if isPlasma
+		then Color3.fromRGB(140, 220, 255)
+		elseif toxic then COLORS.Toxic
+		else COLORS.Cyan
 	labelOn(
 		body,
 		string.format("%s  •  Lv.%s", displayName, tostring(mutant.Level or 1)),
-		Vector3.new(0, 2.6, 0)
+		Vector3.new(0, if isPlasma then 4.1 else 2.6, 0),
+		labelColor
 	)
 	model.Parent = parent
 	return model
@@ -344,7 +383,10 @@ local function makeHologramPlaceholder(parent, mutant, at, order)
 	ring.Shape = Enum.PartType.Cylinder
 	ring.CFrame = at * CFrame.new(0, 0.25, 0) * CFrame.Angles(0, 0, math.pi / 2)
 
-	local displayName = if mutant.Type == "ToxicBlob" then "TOXIC BLOB" else "BLOB"
+	local displayName = if mutant.Type == "PlasmaBlob"
+		then "PLASMA BLOB"
+		elseif mutant.Type == "ToxicBlob" then "TOXIC BLOB"
+		else "BLOB"
 	labelOn(ghost, string.format("%s  •  IN TRAINING", displayName), Vector3.new(0, 2.4, 0), COLORS.Orange)
 	model.Parent = parent
 	return model
@@ -779,6 +821,7 @@ function WorldController:_startMergeAnimation(mutant1, mutant2, newMutant, targe
 		targetPos = targetPadCFrame.Position,
 		targetIndex = targetIndex,
 		targetMutantId = newMutant.Id,
+		targetType = newMutant.Type,
 		m1 = m1,
 		m2 = m2,
 		core = core,
@@ -822,12 +865,18 @@ function WorldController:_updateMergeAnimation(now)
 		-- Phase 2: Vortex / Synthesis Reaction
 		if not merge.vortexStarted then
 			merge.vortexStarted = true
+			local bannerText = if merge.targetType == "PlasmaBlob"
+				then "⚡ SYNTHESIZING PLASMA..."
+				else "⚗ SYNTHESIZING MUTATION..."
+			local bannerColor = if merge.targetType == "PlasmaBlob"
+				then Color3.fromRGB(120, 230, 255)
+				else COLORS.Purple
 			spawnFloatingBanner(
 				self._root,
-				"⚗ SYNTHESIZING MUTATION...",
+				bannerText,
 				midPos + Vector3.new(0, 2.2, 0),
-				COLORS.Purple,
-				Color3.fromRGB(60, 20, 80),
+				bannerColor,
+				Color3.fromRGB(40, 10, 70),
 				0.9
 			)
 			if core then
@@ -843,11 +892,15 @@ function WorldController:_updateMergeAnimation(now)
 		local coreSize = 1.6 + math.sin(t * 16) * 0.8
 		if core then
 			core.Size = Vector3.new(coreSize, coreSize, coreSize)
-			core.Color = if t < 0.5 then COLORS.Cyan else COLORS.Toxic
+			if merge.targetType == "PlasmaBlob" then
+				core.Color = if t < 0.5 then COLORS.Toxic else Color3.fromRGB(120, 220, 255)
+			else
+				core.Color = if t < 0.5 then COLORS.Cyan else COLORS.Toxic
+			end
 		end
 		if light then
 			light.Brightness = 0.35 + math.sin(t * 16) * 0.25
-			light.Color = if t < 0.5 then COLORS.Cyan else COLORS.Toxic
+			light.Color = core.Color
 		end
 
 		local p1 = midPos
@@ -879,7 +932,7 @@ function WorldController:_updateMergeAnimation(now)
 			m2:PivotTo(CFrame.new(p2))
 		end
 	elseif elapsed < 1.35 then
-		-- Phase 3: Chemical Burst & Victorious Leap
+		-- Phase 3: Chemical/Plasma Burst & Victorious Leap
 		if not merge.burstTriggered then
 			merge.burstTriggered = true
 			if m1 and m1.Parent then
@@ -894,8 +947,11 @@ function WorldController:_updateMergeAnimation(now)
 			if light then
 				light.Brightness = 0
 			end
-			spawnShockwave(self._root, midPos, COLORS.Toxic, 7.5, 0.45)
-			spawnLightRing(self._root, midPos - Vector3.new(0, 1.5, 0), COLORS.Purple, 6.0, 0.45)
+			local isPlasma = merge.targetType == "PlasmaBlob"
+			local shockColor = if isPlasma then Color3.fromRGB(110, 230, 255) else COLORS.Toxic
+			local ringColor = if isPlasma then Color3.fromRGB(180, 70, 255) else COLORS.Purple
+			spawnShockwave(self._root, midPos, shockColor, 7.5, 0.45)
+			spawnLightRing(self._root, midPos - Vector3.new(0, 1.5, 0), ringColor, 6.0, 0.45)
 
 			for _, p in newModel:GetDescendants() do
 				if p:IsA("BasePart") then
@@ -916,13 +972,19 @@ function WorldController:_updateMergeAnimation(now)
 		-- Phase 4: Landing on Pedestal
 		if not merge.landingTriggered then
 			merge.landingTriggered = true
-			spawnLightRing(self._root, targetPos + Vector3.new(0, 0.2, 0), COLORS.Toxic, 4.5, 0.6)
+			local isPlasma = merge.targetType == "PlasmaBlob"
+			local bannerText = if isPlasma
+				then "⚡ PLASMA BLOB SYNTHESIZED! ✨"
+				else "☣ TOXIC BLOB SYNTHESIZED! ✨"
+			local bannerColor = if isPlasma then Color3.fromRGB(120, 230, 255) else COLORS.Toxic
+			local strokeColor = if isPlasma then Color3.fromRGB(40, 10, 70) else Color3.fromRGB(30, 80, 20)
+			spawnLightRing(self._root, targetPos + Vector3.new(0, 0.2, 0), bannerColor, 4.5, 0.6)
 			spawnFloatingBanner(
 				self._root,
-				"☣ TOXIC BLOB SYNTHESIZED! ✨",
+				bannerText,
 				targetPos + Vector3.new(0, 4.2, 0),
-				COLORS.Toxic,
-				Color3.fromRGB(30, 80, 20),
+				bannerColor,
+				strokeColor,
 				1.2
 			)
 			if newModel and newModel.PrimaryPart then
@@ -996,7 +1058,11 @@ function WorldController:SetState(snapshot)
 			end
 		end
 
-		if #removed == 2 and #added == 1 and added[1].mutant.Type == "ToxicBlob" then
+		if
+			#removed == 2
+			and #added == 1
+			and (added[1].mutant.Type == "ToxicBlob" or added[1].mutant.Type == "PlasmaBlob")
+		then
 			-- Merge detected!
 			self:_startMergeAnimation(
 				removed[1].mutant,
@@ -1153,13 +1219,62 @@ function WorldController:_animateBattle()
 	local now = workspace:GetServerTimeNow()
 	local duration = math.max(0.1, self._battle.EndsAt - self._battle.StartedAt)
 	local elapsed = math.clamp(now - self._battle.StartedAt, 0, duration)
+	local isPlasma = (self._battlingMutantType == "PlasmaBlob")
 	local isToxic = (self._battlingMutantType == "ToxicBlob")
 
 	local currentHit = 0
 	local targetHp = 300
 	local isImpact = false
 
-	if isToxic then
+	if isPlasma then
+		-- Plasma Blob: 3 high-voltage lightning strikes (-85, -100, -115) knocking out dummy!
+		if elapsed >= 4.2 then
+			currentHit = 3
+			targetHp = 0
+		elseif elapsed >= 2.6 then
+			currentHit = 2
+			targetHp = 115
+		elseif elapsed >= 1.2 then
+			currentHit = 1
+			targetHp = 215
+		end
+
+		for _, hitTime in { 1.2, 2.6, 4.2 } do
+			if elapsed >= hitTime and elapsed <= hitTime + 0.25 then
+				isImpact = true
+				break
+			end
+		end
+
+		if currentHit > (self._lastHitIndex or 0) then
+			self._lastHitIndex = currentHit
+			if currentHit == 1 then
+				spawnDamagePopup(
+					self._battleFolder,
+					"⚡ -85 LIGHTNING!",
+					Vector3.new(0.5, 6.0, 8),
+					Color3.fromRGB(120, 240, 255),
+					Color3.fromRGB(30, 80, 160)
+				)
+			elseif currentHit == 2 then
+				spawnDamagePopup(
+					self._battleFolder,
+					"⚡ -100 OVERLOAD!",
+					Vector3.new(0.5, 6.2, 8),
+					Color3.fromRGB(200, 100, 255),
+					Color3.fromRGB(70, 10, 130)
+				)
+			elseif currentHit == 3 then
+				spawnDamagePopup(
+					self._battleFolder,
+					"⚡ -115 PLASMA BURST!",
+					Vector3.new(0.5, 6.6, 8),
+					Color3.fromRGB(255, 230, 80),
+					Color3.fromRGB(160, 40, 10)
+				)
+			end
+		end
+	elseif isToxic then
 		-- Toxic Blob: Heavy strikes + 5 ticking poison procs!
 		if elapsed >= 5.0 then
 			currentHit = 8
@@ -1282,7 +1397,7 @@ function WorldController:_animateBattle()
 
 	-- Animate Dummy
 	if dummy and dummy.PrimaryPart then
-		local isKnockedOut = isToxic and elapsed >= 5.0
+		local isKnockedOut = (isToxic and elapsed >= 5.0) or (isPlasma and elapsed >= 4.2)
 		local tiltAngle = 0
 		local dummyY = 2.7
 		local dummyX = 0.5
@@ -1314,6 +1429,9 @@ function WorldController:_animateBattle()
 				if isKnockedOut then
 					label.Text = "TARGET DUMMY • 0 / 300 HP [KO]"
 					label.TextColor3 = Color3.fromRGB(255, 75, 75)
+				elseif isPlasma and elapsed >= 1.2 then
+					label.Text = string.format("TARGET DUMMY • %d / 300 HP [⚡ ELECTRIFIED]", currentHpInt)
+					label.TextColor3 = Color3.fromRGB(120, 230, 255)
 				elseif isToxic and elapsed >= 0.9 then
 					label.Text = string.format("TARGET DUMMY • %d / 300 HP [☣ POISONED]", currentHpInt)
 					label.TextColor3 = Color3.fromRGB(220, 130, 255)
@@ -1324,7 +1442,7 @@ function WorldController:_animateBattle()
 			end
 		end
 
-		-- Hit flash / Poison Highlight
+		-- Hit flash / Poison / Electrified Highlight
 		local flash = dummy:FindFirstChild("CombatFlash")
 		local isPoisonTick = isToxic
 			and (currentHit == 2 or currentHit == 3 or currentHit == 5 or currentHit == 6 or currentHit == 8)
@@ -1334,9 +1452,22 @@ function WorldController:_animateBattle()
 			if not flash then
 				local h = Instance.new("Highlight")
 				h.Name = "CombatFlash"
-				h.FillColor = if isToxic then Color3.fromRGB(178, 255, 43) else Color3.fromRGB(255, 70, 70)
-				h.FillTransparency = 0.25
-				h.OutlineTransparency = 0.4
+				h.FillColor = if isPlasma
+					then Color3.fromRGB(120, 240, 255)
+					elseif isToxic then Color3.fromRGB(178, 255, 43)
+					else Color3.fromRGB(255, 70, 70)
+				h.FillTransparency = 0.2
+				h.OutlineTransparency = 0.3
+				h.Adornee = dummy
+				h.Parent = dummy
+			end
+		elseif isPlasma and elapsed >= 1.2 and not isKnockedOut and math.sin(now * 16) > 0.3 then
+			if not flash then
+				local h = Instance.new("Highlight")
+				h.Name = "CombatFlash"
+				h.FillColor = Color3.fromRGB(150, 70, 255)
+				h.FillTransparency = 0.4
+				h.OutlineTransparency = 0.5
 				h.Adornee = dummy
 				h.Parent = dummy
 			end
@@ -1362,7 +1493,46 @@ function WorldController:_animateBattle()
 		local fX = -6.5
 		local fY = 2.3
 
-		if isToxic then
+		if isPlasma then
+			if elapsed >= 4.4 then
+				local hover = math.sin((elapsed - 4.4) * 6) * 0.35
+				fY = 2.7 + hover
+				fX = -6.5
+			elseif elapsed >= 3.6 then
+				local t = (elapsed - 3.6) / 0.6
+				if t < 0.3 then
+					fX = -6.5 - t * 2.0
+					fY = 2.3
+				elseif t < 0.7 then
+					local st = (t - 0.3) / 0.4
+					fX = -7.1 + st * 5.2
+					fY = 2.3 + math.sin(st * math.pi) * 1.8
+				else
+					fX = -1.9
+					fY = 2.3
+				end
+			elseif elapsed >= 2.0 then
+				local t = (elapsed - 2.0) / 0.6
+				if t < 0.5 then
+					fX = -6.5 + (t / 0.5) * 4.6
+					fY = 2.3 + math.sin((t / 0.5) * math.pi) * 1.2
+				else
+					local rt = (t - 0.5) / 0.5
+					fX = -1.9 - rt * 4.6
+					fY = 2.3
+				end
+			else
+				local t = elapsed / 1.2
+				if t >= 0.6 and t <= 1.0 then
+					local st = (t - 0.6) / 0.4
+					fX = -6.5 + st * 4.6
+					fY = 2.3 + math.sin(st * math.pi) * 1.0
+				else
+					fX = -6.5
+					fY = 2.3
+				end
+			end
+		elseif isToxic then
 			if elapsed >= 4.8 then
 				local victoryWave = math.sin((elapsed - 4.8) * 8)
 				fY = 2.3 + math.max(0, victoryWave) * 0.45

@@ -146,6 +146,9 @@ function GameState.validateProfile(profile: any, gameConfig: any, mutantConfig: 
 		elseif mutant.Type == "ToxicBlob" then
 			acquisitionUnits += 2
 			hasToxicBlob = true
+		elseif mutant.Type == "PlasmaBlob" then
+			acquisitionUnits += 4
+			hasToxicBlob = true
 		else
 			return false
 		end

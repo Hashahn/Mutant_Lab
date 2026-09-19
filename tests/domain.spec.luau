@@ -128,6 +128,30 @@ expect(#mergeProfile.Mutants == 1 and mergeProfile.Mutants[1].Type == "ToxicBlob
 expect(mergeProfile.Tutorial.FirstMergeCompleted, "merge tutorial flag missing")
 expect(GameState.validateProfile(mergeProfile, GameConfig, MutantConfig), "profile invalid after merge")
 
+-- Merge two ToxicBlobs into a Tier 3 PlasmaBlob
+local plasmaProfile = GameState.newProfile(GameConfig)
+local plasmaRules = newRules()
+plasmaProfile.Tutorial.Started = true
+plasmaProfile.Tutorial.FreeBlobsClaimed = 2
+plasmaProfile.Tutorial.FirstBlobCreated = true
+plasmaProfile.Tutorial.FirstMergeCompleted = true
+plasmaProfile.Tutorial.FirstBattleStarted = true
+plasmaProfile.Tutorial.FirstBattleCompleted = true
+plasmaProfile.Tutorial.FirstBlobPurchased = true
+plasmaProfile.Tutorial.TutorialCompleted = true
+plasmaProfile.Mutants = {
+	{ Id = "toxic-1", Type = "ToxicBlob", Tier = 2, Level = 1 },
+	{ Id = "toxic-2", Type = "ToxicBlob", Tier = 2, Level = 1 },
+}
+ok, code = plasmaRules:Merge(plasmaProfile, false, "toxic-1", "toxic-2")
+expect(ok and code == "OK", "plasma merge failed")
+expect(#plasmaProfile.Mutants == 1 and plasmaProfile.Mutants[1].Type == "PlasmaBlob", "plasma mutant wrong")
+expect(plasmaProfile.Mutants[1].Tier == 3, "plasma tier wrong")
+expect(GameState.validateProfile(plasmaProfile, GameConfig, MutantConfig), "plasma profile validation failed")
+local plasmaId = plasmaProfile.Mutants[1].Id
+ok, code, battle = plasmaRules:StartBattle(plasmaProfile, false, plasmaId, 500)
+expect(ok and code == "OK" and battle.Reward == 85, "plasma battle reward wrong")
+
 -- Battle is transient, enforces the tutorial order, and rewards exactly once.
 local gatedProfile = GameState.newProfile(GameConfig)
 local gatedRules = newRules()

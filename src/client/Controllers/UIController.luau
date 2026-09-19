@@ -35,7 +35,7 @@ local ERROR_TEXT = {
 	INVALID_REQUEST = "That request was not understood.",
 	INSUFFICIENT_FUNDS = "You need more BioCoins.",
 	INVENTORY_FULL = "Your mutant slots are full.",
-	INVALID_MERGE = "Select two compatible Blobs to merge.",
+	INVALID_MERGE = "Select two identical mutants to merge (2x Blob or 2x Toxic Blob).",
 	MUTANT_NOT_FOUND = "That mutant is no longer available.",
 	MUTANT_BUSY = "That mutant is currently battling.",
 	BATTLE_RUNNING = "A training battle is already running.",
@@ -535,13 +535,16 @@ function UIController:_renderInventory()
 		selectButton.Size = UDim2.new(1, -58, 1, 0)
 		selectButton.Text = ""
 		selectButton.Parent = card
-		local name = makeLabel(
-			selectButton,
-			if mutant.Type == "ToxicBlob" then "TOXIC BLOB" else "BLOB",
-			UDim2.new(0.5, 0, 0, 28),
-			if mutant.Type == "ToxicBlob" then COLORS.Lime else COLORS.Cyan,
-			Enum.Font.GothamBold
-		)
+		local displayName = if mutant.Type == "PlasmaBlob"
+			then "PLASMA BLOB"
+			elseif mutant.Type == "ToxicBlob" then "TOXIC BLOB"
+			else "BLOB"
+		local nameColor = if mutant.Type == "PlasmaBlob"
+			then COLORS.Purple
+			elseif mutant.Type == "ToxicBlob" then COLORS.Lime
+			else COLORS.Cyan
+		local name =
+			makeLabel(selectButton, displayName, UDim2.new(0.5, 0, 0, 28), nameColor, Enum.Font.GothamBold)
 		name.Position = UDim2.fromOffset(12, 8)
 		name.TextSize = 15
 
@@ -714,7 +717,7 @@ function UIController:ShowResult(action, ok, code)
 	if ok then
 		local messages = {
 			CreateBlob = "New Blob stabilized.",
-			Merge = "Merge successful. Toxic Blob created!",
+			Merge = "Merge successful! Evolution completed.",
 			StartBattle = "Training started.",
 			ReleaseMutant = "Specimen released. No refund was issued.",
 		}

@@ -121,11 +121,16 @@ function GameRules:Merge(profile: any, battle: any, firstId: any, secondId: any)
 	if isActiveBattle(battle) and (battle.MutantId == firstId or battle.MutantId == secondId) then
 		return false, "MUTANT_BUSY"
 	end
-	if first.Type ~= "Blob" or second.Type ~= "Blob" then
+	local targetType = nil
+	if first.Type == "Blob" and second.Type == "Blob" then
+		targetType = "ToxicBlob"
+	elseif first.Type == "ToxicBlob" and second.Type == "ToxicBlob" then
+		targetType = "PlasmaBlob"
+	else
 		return false, "INVALID_MERGE"
 	end
 
-	local definition = self._mutantConfig.ToxicBlob
+	local definition = self._mutantConfig[targetType]
 	local mutantId = self:_newMutantId(profile)
 	if type(definition) ~= "table" or mutantId == nil then
 		return false, "INTERNAL_ERROR"
@@ -137,7 +142,7 @@ function GameRules:Merge(profile: any, battle: any, firstId: any, secondId: any)
 	table.remove(profile.Mutants, lowIndex)
 	table.insert(profile.Mutants, {
 		Id = mutantId,
-		Type = "ToxicBlob",
+		Type = targetType,
 		Tier = definition.Tier,
 		Level = 1,
 	})
@@ -216,7 +221,7 @@ function GameRules:CompleteBattle(profile: any, battle: any, now: any): (boolean
 	battle.Consumed = true
 	profile.BioCoins += reward
 	profile.Tutorial.FirstBattleCompleted = true
-	if mutant.Type == "ToxicBlob" then
+	if mutant.Type == "ToxicBlob" or mutant.Type == "PlasmaBlob" then
 		profile.Tutorial.TutorialCompleted = true
 	end
 
