@@ -113,6 +113,138 @@ local function spawnDamagePopup(parent, text, position, textColor, strokeColor)
 	end)
 end
 
+local function spawnLightRing(parent, position, color, maxRadius, duration)
+	local ring = Instance.new("Part")
+	ring.Name = "LightRing"
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Size = Vector3.new(0.08, 0.5, 0.5)
+	ring.CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.pi / 2)
+	ring.Color = color or COLORS.Cyan
+	ring.Material = Enum.Material.SmoothPlastic
+	ring.Anchored = true
+	ring.CanCollide = false
+	ring.CanQuery = false
+	ring.CanTouch = false
+	ring.CastShadow = false
+	ring.Transparency = 0.2
+	ring.Parent = parent
+
+	local startClock = os.clock()
+	local conn
+	conn = RunService.RenderStepped:Connect(function()
+		if not ring or not ring.Parent then
+			if conn then
+				conn:Disconnect()
+			end
+			return
+		end
+		local elapsed = os.clock() - startClock
+		if elapsed >= duration then
+			conn:Disconnect()
+			ring:Destroy()
+			return
+		end
+		local alpha = elapsed / duration
+		local radius = 0.5 + (maxRadius - 0.5) * alpha
+		ring.Size = Vector3.new(0.08, radius, radius)
+		ring.Transparency = 0.2 + 0.8 * alpha
+	end)
+end
+
+local function spawnShockwave(parent, position, color, maxRadius, duration)
+	local sphere = Instance.new("Part")
+	sphere.Name = "Shockwave"
+	sphere.Shape = Enum.PartType.Ball
+	sphere.Size = Vector3.new(0.5, 0.5, 0.5)
+	sphere.CFrame = CFrame.new(position)
+	sphere.Color = color or COLORS.Toxic
+	sphere.Material = Enum.Material.ForceField
+	sphere.Anchored = true
+	sphere.CanCollide = false
+	sphere.CanQuery = false
+	sphere.CanTouch = false
+	sphere.CastShadow = false
+	sphere.Transparency = 0.3
+	sphere.Parent = parent
+
+	local startClock = os.clock()
+	local conn
+	conn = RunService.RenderStepped:Connect(function()
+		if not sphere or not sphere.Parent then
+			if conn then
+				conn:Disconnect()
+			end
+			return
+		end
+		local elapsed = os.clock() - startClock
+		if elapsed >= duration then
+			conn:Disconnect()
+			sphere:Destroy()
+			return
+		end
+		local alpha = elapsed / duration
+		local currentSize = 0.5 + (maxRadius - 0.5) * alpha
+		sphere.Size = Vector3.new(currentSize, currentSize, currentSize)
+		sphere.Transparency = 0.3 + 0.7 * alpha
+	end)
+end
+
+local function spawnFloatingBanner(parent, text, position, textColor, strokeColor, duration)
+	local bannerPart = Instance.new("Part")
+	bannerPart.Name = "FloatingBanner"
+	bannerPart.Transparency = 1
+	bannerPart.CanCollide = false
+	bannerPart.CanQuery = false
+	bannerPart.CanTouch = false
+	bannerPart.Anchored = true
+	bannerPart.CFrame = CFrame.new(position)
+	bannerPart.Parent = parent
+
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromOffset(240, 44)
+	gui.AlwaysOnTop = true
+	gui.Parent = bannerPart
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = text
+	label.TextColor3 = textColor or Color3.fromRGB(255, 255, 255)
+	label.Font = Enum.Font.GothamBlack
+	label.TextScaled = true
+	label.Parent = gui
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = strokeColor or Color3.fromRGB(20, 30, 40)
+	stroke.Thickness = 2.5
+	stroke.Parent = label
+
+	local totalDuration = duration or 1.2
+	local startClock = os.clock()
+	local conn
+	conn = RunService.RenderStepped:Connect(function()
+		if not bannerPart or not bannerPart.Parent then
+			if conn then
+				conn:Disconnect()
+			end
+			return
+		end
+		local elapsed = os.clock() - startClock
+		if elapsed >= totalDuration then
+			conn:Disconnect()
+			bannerPart:Destroy()
+			return
+		end
+		bannerPart.CFrame = CFrame.new(position + Vector3.new(0, elapsed * 2.2, 0))
+		local alpha = elapsed / totalDuration
+		if alpha > 0.6 then
+			local fade = (alpha - 0.6) / 0.4
+			label.TextTransparency = fade
+			stroke.Transparency = fade
+		end
+	end)
+end
+
 local function makeBlob(parent, mutant, at, order)
 	local model = Instance.new("Model")
 	model.Name = tostring(mutant.Id)
@@ -305,6 +437,9 @@ function WorldController.new()
 	self._displayedHp = 300
 	self._battlingMutantType = "Blob"
 	self._lightingEffects = {}
+	self._knownMutants = nil
+	self._activeMerge = nil
+	self._mergeFolder = nil
 	return self
 end
 
@@ -498,6 +633,9 @@ function WorldController:Start()
 		end
 		self:_animateBlobs()
 		self:_animateBattle()
+		if self._activeMerge then
+			self:_updateMergeAnimation(os.clock())
+		end
 	end)
 end
 
@@ -539,20 +677,330 @@ function WorldController:_updateSelectionHighlights()
 	end
 end
 
+function WorldController:_startMergeAnimation(mutant1, mutant2, newMutant, targetIndex, padIndex1, padIndex2)
+	if not self._root then
+		return
+	end
+	self:_completeMergeAnimation()
+
+	local folder = Instance.new("Folder")
+	folder.Name = "MergeVFX"
+	folder.Parent = self._root
+	self._mergeFolder = folder
+
+	local padCFrame1 = CFrame.new(-13 + (padIndex1 - 1) * 5.1, 0.5, 3)
+	local padCFrame2 = CFrame.new(-13 + (padIndex2 - 1) * 5.1, 0.5, 3)
+	local targetPadCFrame = CFrame.new(-13 + (targetIndex - 1) * 5.1, 0.5, 3)
+
+	local pos1 = padCFrame1.Position
+	local pos2 = padCFrame2.Position
+	local midPos = (pos1 + pos2) * 0.5 + Vector3.new(0, 3.2, 0)
+
+	local m1 = makeBlob(folder, mutant1, padCFrame1, 1)
+	local m2 = makeBlob(folder, mutant2, padCFrame2, 2)
+
+	local core = part(
+		folder,
+		"ReactionCore",
+		Vector3.new(0.5, 0.5, 0.5),
+		CFrame.new(midPos),
+		COLORS.Cyan,
+		Enum.Material.SmoothPlastic
+	)
+	core.Shape = Enum.PartType.Ball
+	core.Transparency = 1
+
+	local light = Instance.new("PointLight")
+	light.Color = COLORS.Cyan
+	light.Brightness = 0
+	light.Range = 10
+	light.Parent = core
+
+	local newModel = makeBlob(folder, newMutant, CFrame.new(midPos), 1)
+	for _, p in newModel:GetDescendants() do
+		if p:IsA("BasePart") then
+			p.Transparency = 1
+		elseif p:IsA("BillboardGui") then
+			p.Enabled = false
+		end
+	end
+
+	self._activeMerge = {
+		startTime = os.clock(),
+		pos1 = pos1,
+		pos2 = pos2,
+		midPos = midPos,
+		targetPos = targetPadCFrame.Position,
+		targetIndex = targetIndex,
+		targetMutantId = newMutant.Id,
+		m1 = m1,
+		m2 = m2,
+		core = core,
+		light = light,
+		newModel = newModel,
+		vortexStarted = false,
+		burstTriggered = false,
+		landingTriggered = false,
+	}
+end
+
+function WorldController:_updateMergeAnimation(now)
+	local merge = self._activeMerge
+	if not merge then
+		return
+	end
+	local elapsed = now - merge.startTime
+	local pos1 = merge.pos1
+	local pos2 = merge.pos2
+	local midPos = merge.midPos
+	local targetPos = merge.targetPos
+	local m1 = merge.m1
+	local m2 = merge.m2
+	local core = merge.core
+	local light = merge.light
+	local newModel = merge.newModel
+
+	if elapsed < 0.45 then
+		-- Phase 1: Leap to Center
+		local t = elapsed / 0.45
+		local arc = math.sin(t * math.pi) * 2.2
+		local p1 = pos1:Lerp(midPos, t) + Vector3.new(0, arc, 0)
+		local p2 = pos2:Lerp(midPos, t) + Vector3.new(0, arc, 0)
+		if m1 and m1.PrimaryPart then
+			m1:PivotTo(CFrame.new(p1))
+		end
+		if m2 and m2.PrimaryPart then
+			m2:PivotTo(CFrame.new(p2))
+		end
+	elseif elapsed < 0.85 then
+		-- Phase 2: Vortex / Synthesis Reaction
+		if not merge.vortexStarted then
+			merge.vortexStarted = true
+			spawnFloatingBanner(
+				self._root,
+				"⚗ SYNTHESIZING MUTATION...",
+				midPos + Vector3.new(0, 2.2, 0),
+				COLORS.Purple,
+				Color3.fromRGB(60, 20, 80),
+				0.9
+			)
+			if core then
+				core.Transparency = 0.2
+			end
+		end
+
+		local t = (elapsed - 0.45) / 0.40
+		local spinAngle = t * math.pi * 5
+		local currentRadius = (1 - t) * 2.2
+		local heightWobble = math.sin(t * 12) * 0.4
+
+		local coreSize = 1.6 + math.sin(t * 16) * 0.8
+		if core then
+			core.Size = Vector3.new(coreSize, coreSize, coreSize)
+			core.Color = if t < 0.5 then COLORS.Cyan else COLORS.Toxic
+		end
+		if light then
+			light.Brightness = 0.35 + math.sin(t * 16) * 0.25
+			light.Color = if t < 0.5 then COLORS.Cyan else COLORS.Toxic
+		end
+
+		local p1 = midPos
+			+ Vector3.new(
+				math.cos(spinAngle) * currentRadius,
+				heightWobble,
+				math.sin(spinAngle) * currentRadius
+			)
+		local p2 = midPos
+			+ Vector3.new(
+				math.cos(spinAngle + math.pi) * currentRadius,
+				-heightWobble,
+				math.sin(spinAngle + math.pi) * currentRadius
+			)
+		local scale = math.clamp(1 - t, 0.05, 1)
+
+		if m1 and m1.PrimaryPart then
+			local b1 = m1:FindFirstChild("Body")
+			if b1 then
+				b1.Size = Vector3.new(3.1 * scale, 2.5 * scale, 3.1 * scale)
+			end
+			m1:PivotTo(CFrame.new(p1))
+		end
+		if m2 and m2.PrimaryPart then
+			local b2 = m2:FindFirstChild("Body")
+			if b2 then
+				b2.Size = Vector3.new(3.1 * scale, 2.5 * scale, 3.1 * scale)
+			end
+			m2:PivotTo(CFrame.new(p2))
+		end
+	elseif elapsed < 1.35 then
+		-- Phase 3: Chemical Burst & Victorious Leap
+		if not merge.burstTriggered then
+			merge.burstTriggered = true
+			if m1 and m1.Parent then
+				m1:Destroy()
+			end
+			if m2 and m2.Parent then
+				m2:Destroy()
+			end
+			if core then
+				core.Transparency = 1
+			end
+			if light then
+				light.Brightness = 0
+			end
+			spawnShockwave(self._root, midPos, COLORS.Toxic, 7.5, 0.45)
+			spawnLightRing(self._root, midPos - Vector3.new(0, 1.5, 0), COLORS.Purple, 6.0, 0.45)
+
+			for _, p in newModel:GetDescendants() do
+				if p:IsA("BasePart") then
+					p.Transparency = 0
+				elseif p:IsA("BillboardGui") then
+					p.Enabled = true
+				end
+			end
+		end
+
+		local t = (elapsed - 0.85) / 0.50
+		local arc = math.sin(t * math.pi) * 2.4
+		local p = midPos:Lerp(targetPos + Vector3.new(0, 1.5, 0), t) + Vector3.new(0, arc, 0)
+		if newModel and newModel.PrimaryPart then
+			newModel:PivotTo(CFrame.new(p))
+		end
+	elseif elapsed < 1.45 then
+		-- Phase 4: Landing on Pedestal
+		if not merge.landingTriggered then
+			merge.landingTriggered = true
+			spawnLightRing(self._root, targetPos + Vector3.new(0, 0.2, 0), COLORS.Toxic, 4.5, 0.6)
+			spawnFloatingBanner(
+				self._root,
+				"☣ TOXIC BLOB SYNTHESIZED! ✨",
+				targetPos + Vector3.new(0, 4.2, 0),
+				COLORS.Toxic,
+				Color3.fromRGB(30, 80, 20),
+				1.2
+			)
+			if newModel and newModel.PrimaryPart then
+				newModel:PivotTo(CFrame.new(targetPos + Vector3.new(0, 1.5, 0)))
+			end
+		end
+	else
+		-- Finished
+		self:_completeMergeAnimation()
+	end
+end
+
+function WorldController:_completeMergeAnimation()
+	if self._activeMerge then
+		local targetMutantId = self._activeMerge.targetMutantId
+		self._activeMerge = nil
+		if self._mergeFolder then
+			self._mergeFolder:Destroy()
+			self._mergeFolder = nil
+		end
+		if self._display and targetMutantId then
+			local model = self._display:FindFirstChild(tostring(targetMutantId))
+			if model then
+				for _, p in model:GetDescendants() do
+					if p:IsA("BasePart") then
+						p.Transparency = 0
+					elseif p:IsA("BillboardGui") then
+						p.Enabled = true
+					end
+				end
+			end
+		end
+	end
+end
+
+function WorldController:HandleActionResult(_action, _ok, _code)
+	-- Ready for action-specific reactions if needed
+end
+
 function WorldController:SetState(snapshot)
 	if not self._display or not self._battleFolder then
 		return
 	end
 	local battlingMutantId = if type(snapshot.Battle) == "table" then snapshot.Battle.MutantId else nil
 
+	-- Detect transitions if already initialized
+	local isSpawnDetected = false
+	local addedMutant = nil
+
+	if self._knownMutants ~= nil then
+		local oldIds = {}
+		local oldIndexById = {}
+		for idx, m in self._knownMutants do
+			table.insert(oldIds, m.Id)
+			oldIndexById[m.Id] = idx
+		end
+
+		local newIds = {}
+		local added = {}
+		for idx, m in snapshot.Mutants or {} do
+			table.insert(newIds, m.Id)
+			if not table.find(oldIds, m.Id) then
+				table.insert(added, { mutant = m, index = idx })
+			end
+		end
+
+		local removed = {}
+		for idx, m in self._knownMutants do
+			if not table.find(newIds, m.Id) then
+				table.insert(removed, { mutant = m, index = idx })
+			end
+		end
+
+		if #removed == 2 and #added == 1 and added[1].mutant.Type == "ToxicBlob" then
+			-- Merge detected!
+			self:_startMergeAnimation(
+				removed[1].mutant,
+				removed[2].mutant,
+				added[1].mutant,
+				added[1].index,
+				removed[1].index,
+				removed[2].index
+			)
+		elseif #added == 1 and #removed == 0 then
+			-- Spawn detected!
+			isSpawnDetected = true
+			addedMutant = added[1].mutant
+		end
+	end
+
+	self._knownMutants = snapshot.Mutants or {}
+
 	self:_clear(self._display)
 	for index, mutant in snapshot.Mutants or {} do
 		if index <= 6 then
 			local padCFrame = CFrame.new(-13 + (index - 1) * 5.1, 0.5, 3)
+			local model
 			if mutant.Id == battlingMutantId then
-				makeHologramPlaceholder(self._display, mutant, padCFrame, index)
+				model = makeHologramPlaceholder(self._display, mutant, padCFrame, index)
 			else
-				makeBlob(self._display, mutant, padCFrame, index)
+				model = makeBlob(self._display, mutant, padCFrame, index)
+			end
+
+			-- If this mutant is actively being animated in MergeVFX, keep it hidden in self._display until merge finishes
+			if self._activeMerge and mutant.Id == self._activeMerge.targetMutantId then
+				for _, p in model:GetDescendants() do
+					if p:IsA("BasePart") then
+						p.Transparency = 1
+					elseif p:IsA("BillboardGui") then
+						p.Enabled = false
+					end
+				end
+			elseif isSpawnDetected and addedMutant and mutant.Id == addedMutant.Id then
+				-- Play spawn incubator bounce!
+				model:SetAttribute("SpawnStartTime", os.clock())
+				spawnLightRing(self._root, padCFrame.Position + Vector3.new(0, 0.2, 0), COLORS.Cyan, 4.2, 0.6)
+				spawnFloatingBanner(
+					self._root,
+					"✨ NEW BLOB CREATED!",
+					padCFrame.Position + Vector3.new(0, 3.8, 0),
+					COLORS.Cyan,
+					Color3.fromRGB(15, 65, 80),
+					1.0
+				)
 			end
 		end
 	end
@@ -596,6 +1044,37 @@ function WorldController:_animateBlobs()
 			local sizeZ = child:GetAttribute("BaseSizeZ")
 
 			if baseX and baseY and sizeX then
+				local spawnStart = child:GetAttribute("SpawnStartTime")
+				if spawnStart then
+					local spawnElapsed = os.clock() - spawnStart
+					if spawnElapsed < 0.75 then
+						local dropY = 0
+						local scaleY = 1
+						local scaleXZ = 1
+						if spawnElapsed < 0.35 then
+							local t = spawnElapsed / 0.35
+							dropY = (1 - t) * (1 - t) * 4.5
+							scaleY = 1.0 + (1 - t) * 0.25
+							scaleXZ = 1.0 - (1 - t) * 0.15
+						elseif spawnElapsed < 0.5 then
+							local t = (spawnElapsed - 0.35) / 0.15
+							local squashFactor = math.sin(t * math.pi)
+							scaleY = 1.0 - squashFactor * 0.45
+							scaleXZ = 1.0 + squashFactor * 0.35
+						else
+							local t = (spawnElapsed - 0.5) / 0.25
+							local rebound = math.sin(t * math.pi) * 0.22
+							scaleY = 1.0 + rebound
+							scaleXZ = 1.0 - rebound * 0.15
+						end
+						body.Size = Vector3.new(sizeX * scaleXZ, sizeY * scaleY, sizeZ * scaleXZ)
+						body.Position = Vector3.new(baseX, baseY + dropY, baseZ)
+						continue
+					else
+						child:SetAttribute("SpawnStartTime", nil)
+					end
+				end
+
 				local wave = math.sin(now * 3 + order * 0.9)
 				local squashY = 1 + wave * 0.08
 				local stretchXZ = 1 - wave * 0.04
@@ -922,6 +1401,7 @@ function WorldController:_animateBattle()
 end
 
 function WorldController:Stop()
+	self:_completeMergeAnimation()
 	if self._renderConnection then
 		self._renderConnection:Disconnect()
 		self._renderConnection = nil

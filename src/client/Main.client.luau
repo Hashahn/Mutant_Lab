@@ -45,6 +45,7 @@ network = NetworkController.new(remotes, {
 	end,
 	OnResult = function(action, ok, code)
 		ui:ShowResult(action, ok, code)
+		world:HandleActionResult(action, ok, code)
 	end,
 	OnNotice = function(notice)
 		ui:ShowNotice(notice)
