@@ -121,7 +121,8 @@ local function makeBlob(parent, mutant, at, order)
 	local toxic = mutant.Type == "ToxicBlob"
 	local bodyColor = if toxic then COLORS.Toxic else COLORS.Cyan
 	local bodySize = if toxic then Vector3.new(3.5, 2.8, 3.5) else Vector3.new(3.1, 2.5, 3.1)
-	local body = part(model, "Body", bodySize, at * CFrame.new(0, 1.5, 0), bodyColor, Enum.Material.Neon)
+	local body =
+		part(model, "Body", bodySize, at * CFrame.new(0, 1.5, 0), bodyColor, Enum.Material.SmoothPlastic)
 	body.Shape = Enum.PartType.Ball
 	model.PrimaryPart = body
 
@@ -139,7 +140,7 @@ local function makeBlob(parent, mutant, at, order)
 			Vector3.new(0.5, 0.65, 0.28),
 			at * CFrame.new(x, 1.85, -1.42),
 			Color3.fromRGB(236, 255, 250),
-			Enum.Material.Neon
+			Enum.Material.SmoothPlastic
 		)
 		eye.Shape = Enum.PartType.Ball
 		local pupil = part(
@@ -165,7 +166,7 @@ local function makeBlob(parent, mutant, at, order)
 				Vector3.new(0.35, 1.4, 0.35),
 				spikeCFrame,
 				COLORS.Purple,
-				Enum.Material.Neon
+				Enum.Material.SmoothPlastic
 			)
 			spike.Shape = Enum.PartType.Cylinder
 		end
@@ -206,7 +207,7 @@ local function makeHologramPlaceholder(parent, mutant, at, order)
 		Vector3.new(3.8, 0.08, 3.8),
 		at * CFrame.new(0, 0.25, 0),
 		COLORS.Orange,
-		Enum.Material.Neon
+		Enum.Material.SmoothPlastic
 	)
 	ring.Shape = Enum.PartType.Cylinder
 	ring.CFrame = at * CFrame.new(0, 0.25, 0) * CFrame.Angles(0, 0, math.pi / 2)
@@ -300,6 +301,8 @@ function WorldController.new()
 	self._previousCameraSubject = nil
 	self._previousCameraCFrame = nil
 	self._lastDamagePopupTime = 0
+	self._lastHitIndex = 0
+	self._displayedHp = 1.0
 	self._lightingEffects = {}
 	return self
 end
@@ -313,22 +316,28 @@ function WorldController:Start()
 	local Lighting = game:GetService("Lighting")
 	self._lightingEffects = {}
 	pcall(function()
-		local bloom = Instance.new("BloomEffect")
-		bloom.Name = "MutantLabBloom"
-		bloom.Intensity = 0.85
-		bloom.Size = 24
-		bloom.Threshold = 1.1
-		bloom.Parent = Lighting
-		table.insert(self._lightingEffects, bloom)
-
 		local cc = Instance.new("ColorCorrectionEffect")
 		cc.Name = "MutantLabColor"
-		cc.Saturation = 0.18
-		cc.Contrast = 0.12
-		cc.Brightness = 0.02
+		cc.Saturation = 0.05
+		cc.Contrast = 0.04
+		cc.Brightness = 0
 		cc.Parent = Lighting
 		table.insert(self._lightingEffects, cc)
 	end)
+
+	local function tuckCharacter(char)
+		task.spawn(function()
+			local rootPart = char:WaitForChild("HumanoidRootPart", 5)
+			if rootPart and rootPart:IsA("BasePart") then
+				rootPart.CFrame = CFrame.new(-3, 2, -45)
+				rootPart.Anchored = true
+			end
+		end)
+	end
+	if Players.LocalPlayer.Character then
+		tuckCharacter(Players.LocalPlayer.Character)
+	end
+	Players.LocalPlayer.CharacterAdded:Connect(tuckCharacter)
 
 	local architecture = Instance.new("Folder")
 	architecture.Name = "Architecture"
@@ -347,7 +356,7 @@ function WorldController:Start()
 		Vector3.new(25, 0.35, 0.25),
 		CFrame.new(0, 9, 13.42),
 		COLORS.Cyan,
-		Enum.Material.Neon
+		Enum.Material.SmoothPlastic
 	)
 	part(
 		architecture,
@@ -363,7 +372,7 @@ function WorldController:Start()
 		Vector3.new(15.4, 0.12, 6.4),
 		CFrame.new(-3, 0.91, 8),
 		COLORS.Orange,
-		Enum.Material.Neon
+		Enum.Material.SmoothPlastic
 	)
 	part(
 		architecture,
@@ -371,7 +380,7 @@ function WorldController:Start()
 		Vector3.new(0.25, 0.05, 5.8),
 		CFrame.new(-3, 0.93, 8),
 		Color3.fromRGB(255, 205, 110),
-		Enum.Material.Neon
+		Enum.Material.SmoothPlastic
 	)
 	local chamberSign = part(
 		architecture,
@@ -399,13 +408,13 @@ function WorldController:Start()
 			Vector3.new(3.5, 0.12, 3.5),
 			CFrame.new(x, 0.51, 3),
 			glowColor,
-			Enum.Material.Neon
+			Enum.Material.SmoothPlastic
 		)
 		local padLight = Instance.new("PointLight")
 		padLight.Name = "PadLight"
 		padLight.Color = glowColor
-		padLight.Range = 10
-		padLight.Brightness = 1.8
+		padLight.Range = 4
+		padLight.Brightness = 0.25
 		padLight.Parent = padGlow
 	end
 
@@ -414,15 +423,15 @@ function WorldController:Start()
 		"ChamberCeilingLight",
 		Vector3.new(3, 0.4, 3),
 		CFrame.new(0, 11, 8),
-		Color3.fromRGB(255, 240, 200),
-		Enum.Material.Neon
+		COLORS.Metal,
+		Enum.Material.Metal
 	)
 	local chamberSpot = Instance.new("SpotLight")
 	chamberSpot.Name = "ChamberSpot"
 	chamberSpot.Color = Color3.fromRGB(255, 230, 180)
-	chamberSpot.Range = 25
-	chamberSpot.Angle = 65
-	chamberSpot.Brightness = 2.2
+	chamberSpot.Range = 22
+	chamberSpot.Angle = 60
+	chamberSpot.Brightness = 1.0
 	chamberSpot.Face = Enum.NormalId.Bottom
 	chamberSpot.Parent = chamberCeiling
 
@@ -537,6 +546,8 @@ function WorldController:SetState(snapshot)
 	self:_updateSelectionHighlights()
 
 	self._battle = snapshot.Battle
+	self._lastHitIndex = 0
+	self._displayedHp = 1.0
 	self:_clear(self._battleFolder)
 	if type(snapshot.Battle) == "table" then
 		makeDummy(self._battleFolder, CFrame.new(0.5, 0.9, 8))
@@ -601,19 +612,73 @@ function WorldController:_animateBattle()
 	local fighter = self._battleFolder:FindFirstChild(tostring(self._battle.MutantId))
 	local now = workspace:GetServerTimeNow()
 	local duration = math.max(0.1, self._battle.EndsAt - self._battle.StartedAt)
-	local progress = math.clamp((now - self._battle.StartedAt) / duration, 0, 1)
-	local pulse = math.sin(now * 8)
-	local lunge = math.max(0, math.sin(now * 5))
+	local elapsed = math.clamp(now - self._battle.StartedAt, 0, duration)
+
+	local currentHit = 0
+	local targetHp = 1.0
+	if elapsed >= 4.6 then
+		currentHit = 4
+		targetHp = 0.0
+	elseif elapsed >= 3.4 then
+		currentHit = 3
+		targetHp = 0.25
+	elseif elapsed >= 2.2 then
+		currentHit = 2
+		targetHp = 0.50
+	elseif elapsed >= 1.0 then
+		currentHit = 1
+		targetHp = 0.75
+	end
+
+	if currentHit > (self._lastHitIndex or 0) then
+		self._lastHitIndex = currentHit
+		local reward = (self._battle and self._battle.Reward) or 35
+		local chunk = math.floor(reward / 4)
+		local popupText
+		if currentHit == 4 then
+			local remainder = reward - (chunk * 3)
+			popupText = string.format("CRIT! -%d", remainder)
+		else
+			popupText = string.format("-%d", chunk)
+		end
+		spawnDamagePopup(self._battleFolder, popupText, Vector3.new(0.5, 5.8, 8))
+	end
+
+	local isImpact = false
+	for _, hitTime in { 1.0, 2.2, 3.4, 4.6 } do
+		if elapsed >= hitTime and elapsed <= hitTime + 0.22 then
+			isImpact = true
+			break
+		end
+	end
+
+	self._displayedHp = self._displayedHp or 1.0
+	self._displayedHp = self._displayedHp + (targetHp - self._displayedHp) * 0.14
+	local hpPercent = math.clamp(self._displayedHp, 0, 1)
 
 	if dummy and dummy.PrimaryPart then
-		dummy:PivotTo(
-			CFrame.new(0.5, 2.7 + math.max(0, pulse) * 0.14, 8)
-				* CFrame.Angles(0, 0, pulse * 0.08 * (1 - progress))
-		)
+		local isKnockedOut = elapsed >= 4.8
+		local tiltAngle = 0
+		local dummyY = 2.7
+		local dummyX = 0.5
+
+		if isKnockedOut then
+			tiltAngle = -1.15
+			dummyY = 1.6
+			dummyX = 1.2
+		elseif isImpact then
+			tiltAngle = -0.22
+			dummyX = 0.8
+		else
+			local idleWave = math.sin(now * 4)
+			dummyY = 2.7 + math.max(0, idleWave) * 0.08
+			tiltAngle = idleWave * 0.04
+		end
+
+		dummy:PivotTo(CFrame.new(dummyX, dummyY, 8) * CFrame.Angles(0, 0, tiltAngle))
 
 		local hpGui = dummy:FindFirstChild("Head") and dummy.Head:FindFirstChild("DummyHP")
 		if hpGui then
-			local hpPercent = math.clamp(1 - progress, 0, 1)
 			local fill = hpGui:FindFirstChild("Background") and hpGui.Background:FindFirstChild("Fill")
 			local label = hpGui:FindFirstChild("Label")
 			if fill then
@@ -621,32 +686,72 @@ function WorldController:_animateBattle()
 				fill.BackgroundColor3 = Color3.fromHSV(hpPercent * 0.33, 0.85, 0.95)
 			end
 			if label then
-				label.Text = string.format("TARGET DUMMY • %d%%", math.ceil(hpPercent * 100))
+				if isKnockedOut or hpPercent < 0.03 then
+					label.Text = "TARGET DUMMY • 0% [KO]"
+					label.TextColor3 = Color3.fromRGB(255, 90, 90)
+				else
+					label.Text = string.format("TARGET DUMMY • %d%%", math.ceil(hpPercent * 100))
+					label.TextColor3 = Color3.fromRGB(240, 245, 250)
+				end
 			end
 		end
 
 		local flash = dummy:FindFirstChild("CombatFlash")
-		if lunge > 0.85 then
+		if isImpact then
 			if not flash then
 				local h = Instance.new("Highlight")
 				h.Name = "CombatFlash"
-				h.FillColor = Color3.fromRGB(255, 75, 75)
-				h.FillTransparency = 0.3
-				h.OutlineTransparency = 0.5
+				h.FillColor = Color3.fromRGB(255, 70, 70)
+				h.FillTransparency = 0.25
+				h.OutlineTransparency = 0.4
 				h.Adornee = dummy
 				h.Parent = dummy
-			end
-			if now - self._lastDamagePopupTime > 0.65 then
-				self._lastDamagePopupTime = now
-				local reward = (self._battle and self._battle.Reward) or 15
-				spawnDamagePopup(self._battleFolder, string.format("-%d", reward), Vector3.new(0.5, 5.8, 8))
 			end
 		elseif flash then
 			flash:Destroy()
 		end
 	end
+
 	if fighter and fighter.PrimaryPart then
-		fighter:PivotTo(CFrame.new(-6.5 + lunge * 4.2, 2.3 + lunge * 0.45, 8))
+		local fX = -6.5
+		local fY = 2.3
+
+		if elapsed >= 4.8 then
+			local victoryWave = math.sin((elapsed - 4.8) * 9)
+			fY = 2.3 + math.max(0, victoryWave) * 0.45
+			fX = -6.5
+		elseif elapsed >= 4.0 then
+			local t = (elapsed - 4.0) / 0.6
+			if t <= 1.0 then
+				local jump = math.sin(t * math.pi) * 1.3
+				fX = -6.5 + t * 4.5
+				fY = 2.3 + jump
+			else
+				fX = -2.0
+				fY = 2.3
+			end
+		else
+			local cycleTime = elapsed % 1.2
+			if cycleTime < 0.4 then
+				local w = math.sin((cycleTime / 0.4) * math.pi)
+				fX = -6.5 - w * 0.4
+				fY = 2.3
+			elseif cycleTime < 0.75 then
+				local lt = (cycleTime - 0.4) / 0.35
+				local jump = math.sin(lt * math.pi) * 0.55
+				fX = -6.5 + lt * 4.5
+				fY = 2.3 + jump
+			elseif cycleTime < 0.95 then
+				fX = -2.0
+				fY = 2.3
+			else
+				local rt = (cycleTime - 0.95) / 0.25
+				fX = -2.0 - rt * 4.5
+				fY = 2.3 + math.sin(rt * math.pi) * 0.3
+			end
+		end
+
+		fighter:PivotTo(CFrame.new(fX, fY, 8))
 	end
 end
 
