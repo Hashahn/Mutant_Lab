@@ -22,7 +22,7 @@ When generating, modifying, or reviewing Luau code for Mutant Lab, strictly foll
 - Battle timestamps use `workspace:GetServerTimeNow()`. One active battle per player; cancel pending battle on leave.
 
 ## 3. Inventory & Release
-- Two tiers (Blob -> Toxic Blob).
+- Three tiers (Blob -> Toxic Blob -> Plasma Blob). Tutorial battles accept Toxic or Plasma; Blob requires completed tutorial.
 - Releasing a mutant frees a slot without refund, requires tutorial completion, and cannot release the last remaining mutant or a mutant currently in battle.
 
 ## 4. Luau Conventions

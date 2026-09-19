@@ -1,7 +1,15 @@
 --!nonstrict
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+
+local CombatPresentation = require(
+	ReplicatedStorage:WaitForChild("MutantLab")
+		:WaitForChild("Shared")
+		:WaitForChild("Config")
+		:WaitForChild("CombatPresentation")
+)
 
 local WorldController = {}
 WorldController.__index = WorldController
@@ -453,7 +461,11 @@ local function makeDummy(parent, at)
 	hpLabel.Name = "Label"
 	hpLabel.Size = UDim2.new(1, 0, 0, 18)
 	hpLabel.BackgroundTransparency = 1
-	hpLabel.Text = "TARGET DUMMY • 300 / 300 HP"
+	hpLabel.Text = string.format(
+		"TARGET DUMMY • %d / %d HP",
+		CombatPresentation.DummyMaxHp,
+		CombatPresentation.DummyMaxHp
+	)
 	hpLabel.TextColor3 = Color3.fromRGB(240, 245, 250)
 	hpLabel.Font = Enum.Font.GothamBold
 	hpLabel.TextSize = 12
@@ -476,7 +488,7 @@ function WorldController.new()
 	self._previousCameraCFrame = nil
 	self._lastDamagePopupTime = 0
 	self._lastHitIndex = 0
-	self._displayedHp = 300
+	self._displayedHp = CombatPresentation.DummyMaxHp
 	self._battlingMutantType = "Blob"
 	self._lightingEffects = {}
 	self._knownMutants = nil
@@ -1029,6 +1041,9 @@ function WorldController:SetState(snapshot)
 		return
 	end
 	local battlingMutantId = if type(snapshot.Battle) == "table" then snapshot.Battle.MutantId else nil
+	local previousBattleId = if type(self._battle) == "table" then self._battle.Id else nil
+	local nextBattleId = if type(snapshot.Battle) == "table" then snapshot.Battle.Id else nil
+	local isSameBattle = previousBattleId ~= nil and previousBattleId == nextBattleId
 
 	-- Detect transitions if already initialized
 	local isSpawnDetected = false
@@ -1119,22 +1134,24 @@ function WorldController:SetState(snapshot)
 	self:_updateSelectionHighlights()
 
 	self._battle = snapshot.Battle
-	self._lastHitIndex = 0
-	self._displayedHp = 300
-	self._battlingMutantType = "Blob"
-	self:_clear(self._battleFolder)
-	if type(snapshot.Battle) == "table" then
-		makeDummy(self._battleFolder, CFrame.new(0.5, 0.9, 8))
-		local fighter = nil
-		for _, mutant in snapshot.Mutants or {} do
-			if mutant.Id == snapshot.Battle.MutantId then
-				fighter = mutant
-				self._battlingMutantType = mutant.Type
-				break
+	if not isSameBattle then
+		self._lastHitIndex = 0
+		self._displayedHp = CombatPresentation.DummyMaxHp
+		self._battlingMutantType = "Blob"
+		self:_clear(self._battleFolder)
+		if type(snapshot.Battle) == "table" then
+			makeDummy(self._battleFolder, CFrame.new(0.5, 0.9, 8))
+			local fighter = nil
+			for _, mutant in snapshot.Mutants or {} do
+				if mutant.Id == snapshot.Battle.MutantId then
+					fighter = mutant
+					self._battlingMutantType = mutant.Type
+					break
+				end
 			end
-		end
-		if fighter then
-			makeBlob(self._battleFolder, fighter, CFrame.new(-6.5, 0.9, 8), 1)
+			if fighter then
+				makeBlob(self._battleFolder, fighter, CFrame.new(-6.5, 0.9, 8), 1)
+			end
 		end
 	end
 end
@@ -1222,178 +1239,96 @@ function WorldController:_animateBattle()
 	local isPlasma = (self._battlingMutantType == "PlasmaBlob")
 	local isToxic = (self._battlingMutantType == "ToxicBlob")
 
-	local currentHit = 0
-	local targetHp = 300
+	local attacks = CombatPresentation.GetAttacks(self._battlingMutantType)
+	local currentHit, targetHp = CombatPresentation.Resolve(self._battlingMutantType, elapsed)
 	local isImpact = false
 
-	if isPlasma then
-		-- Plasma Blob: 3 high-voltage lightning strikes (-85, -100, -115) knocking out dummy!
-		if elapsed >= 4.2 then
-			currentHit = 3
-			targetHp = 0
-		elseif elapsed >= 2.6 then
-			currentHit = 2
-			targetHp = 115
-		elseif elapsed >= 1.2 then
-			currentHit = 1
-			targetHp = 215
+	for _, attack in attacks do
+		local impactDuration = if isPlasma then 0.25 else 0.22
+		if attack.Impact and elapsed >= attack.Time and elapsed <= attack.Time + impactDuration then
+			isImpact = true
+			break
 		end
+	end
 
-		for _, hitTime in { 1.2, 2.6, 4.2 } do
-			if elapsed >= hitTime and elapsed <= hitTime + 0.25 then
-				isImpact = true
-				break
-			end
-		end
-
-		if currentHit > (self._lastHitIndex or 0) then
-			self._lastHitIndex = currentHit
-			if currentHit == 1 then
+	local previousHit = self._lastHitIndex or 0
+	for hitIndex = previousHit + 1, currentHit do
+		local popupText = CombatPresentation.PopupText(attacks[hitIndex])
+		if isPlasma then
+			if hitIndex == 1 then
 				spawnDamagePopup(
 					self._battleFolder,
-					"⚡ -85 LIGHTNING!",
+					popupText,
 					Vector3.new(0.5, 6.0, 8),
 					Color3.fromRGB(120, 240, 255),
 					Color3.fromRGB(30, 80, 160)
 				)
-			elseif currentHit == 2 then
+			elseif hitIndex == 2 then
 				spawnDamagePopup(
 					self._battleFolder,
-					"⚡ -100 OVERLOAD!",
+					popupText,
 					Vector3.new(0.5, 6.2, 8),
 					Color3.fromRGB(200, 100, 255),
 					Color3.fromRGB(70, 10, 130)
 				)
-			elseif currentHit == 3 then
+			else
 				spawnDamagePopup(
 					self._battleFolder,
-					"⚡ -115 PLASMA BURST!",
+					popupText,
 					Vector3.new(0.5, 6.6, 8),
 					Color3.fromRGB(255, 230, 80),
 					Color3.fromRGB(160, 40, 10)
 				)
 			end
-		end
-	elseif isToxic then
-		-- Toxic Blob: Heavy strikes + 5 ticking poison procs!
-		if elapsed >= 5.0 then
-			currentHit = 8
-			targetHp = 0
-		elseif elapsed >= 4.5 then
-			currentHit = 7
-			targetHp = 60
-		elseif elapsed >= 3.9 then
-			currentHit = 6
-			targetHp = 130
-		elseif elapsed >= 3.3 then
-			currentHit = 5
-			targetHp = 150
-		elseif elapsed >= 2.7 then
-			currentHit = 4
-			targetHp = 170
-		elseif elapsed >= 2.1 then
-			currentHit = 3
-			targetHp = 225
-		elseif elapsed >= 1.5 then
-			currentHit = 2
-			targetHp = 240
-		elseif elapsed >= 0.9 then
-			currentHit = 1
-			targetHp = 255
-		end
-
-		for _, hitTime in { 0.9, 2.7, 4.5 } do
-			if elapsed >= hitTime and elapsed <= hitTime + 0.22 then
-				isImpact = true
-				break
-			end
-		end
-
-		if currentHit > (self._lastHitIndex or 0) then
-			self._lastHitIndex = currentHit
-			if currentHit == 1 then
+		elseif isToxic then
+			if hitIndex == 1 or hitIndex == 4 then
 				spawnDamagePopup(
 					self._battleFolder,
-					"-45",
+					popupText,
 					Vector3.new(0.5, 5.8, 8),
 					Color3.fromRGB(178, 255, 43)
 				)
-			elseif currentHit == 2 or currentHit == 3 then
+			elseif hitIndex == 2 or hitIndex == 3 or hitIndex == 5 or hitIndex == 6 then
 				spawnDamagePopup(
 					self._battleFolder,
-					"☣ -15 POISON",
+					popupText,
 					Vector3.new(0.5, 6.2, 8),
 					Color3.fromRGB(210, 110, 255),
 					Color3.fromRGB(80, 20, 110)
 				)
-			elseif currentHit == 4 then
+			elseif hitIndex == 7 then
 				spawnDamagePopup(
 					self._battleFolder,
-					"-55",
-					Vector3.new(0.5, 5.8, 8),
-					Color3.fromRGB(178, 255, 43)
-				)
-			elseif currentHit == 5 or currentHit == 6 then
-				spawnDamagePopup(
-					self._battleFolder,
-					"☣ -20 POISON",
-					Vector3.new(0.5, 6.2, 8),
-					Color3.fromRGB(210, 110, 255),
-					Color3.fromRGB(80, 20, 110)
-				)
-			elseif currentHit == 7 then
-				spawnDamagePopup(
-					self._battleFolder,
-					"☣ TOXIC SLAM! -70",
+					popupText,
 					Vector3.new(0.5, 5.8, 8),
 					Color3.fromRGB(255, 120, 40),
 					Color3.fromRGB(140, 40, 10)
 				)
-			elseif currentHit == 8 then
+			else
 				spawnDamagePopup(
 					self._battleFolder,
-					"☣ FATAL POISON! -60",
+					popupText,
 					Vector3.new(0.5, 6.4, 8),
 					Color3.fromRGB(255, 60, 60),
 					Color3.fromRGB(110, 15, 15)
 				)
 			end
-		end
-	else
-		-- Normal Blob: 4 physical body slams, leaves dummy with 120/300 HP standing!
-		if elapsed >= 4.6 then
-			currentHit = 4
-			targetHp = 120
-		elseif elapsed >= 3.4 then
-			currentHit = 3
-			targetHp = 165
-		elseif elapsed >= 2.2 then
-			currentHit = 2
-			targetHp = 210
-		elseif elapsed >= 1.0 then
-			currentHit = 1
-			targetHp = 255
-		end
-
-		for _, hitTime in { 1.0, 2.2, 3.4, 4.6 } do
-			if elapsed >= hitTime and elapsed <= hitTime + 0.22 then
-				isImpact = true
-				break
-			end
-		end
-
-		if currentHit > (self._lastHitIndex or 0) then
-			self._lastHitIndex = currentHit
-			local dmg = if currentHit == 4 then "-25" else "-20"
-			spawnDamagePopup(self._battleFolder, dmg, Vector3.new(0.5, 5.8, 8), Color3.fromRGB(255, 215, 60))
+		else
+			spawnDamagePopup(
+				self._battleFolder,
+				popupText,
+				Vector3.new(0.5, 5.8, 8),
+				Color3.fromRGB(255, 215, 60)
+			)
 		end
 	end
+	self._lastHitIndex = currentHit
 
 	-- Smooth HP transition
-	self._displayedHp = self._displayedHp or 300
-	self._displayedHp = self._displayedHp + (targetHp - self._displayedHp) * 0.14
-	local currentHpInt = math.clamp(math.ceil(self._displayedHp), 0, 300)
-	local hpFraction = currentHpInt / 300
+	self._displayedHp = self._displayedHp or CombatPresentation.DummyMaxHp
+	self._displayedHp = CombatPresentation.StepDisplayedHp(self._displayedHp, targetHp)
+	local currentHpInt = math.clamp(math.ceil(self._displayedHp), 0, CombatPresentation.DummyMaxHp)
+	local hpFraction = currentHpInt / CombatPresentation.DummyMaxHp
 
 	-- Animate Dummy
 	if dummy and dummy.PrimaryPart then
@@ -1427,16 +1362,29 @@ function WorldController:_animateBattle()
 			end
 			if label then
 				if isKnockedOut then
-					label.Text = "TARGET DUMMY • 0 / 300 HP [KO]"
+					label.Text =
+						string.format("TARGET DUMMY • 0 / %d HP [KO]", CombatPresentation.DummyMaxHp)
 					label.TextColor3 = Color3.fromRGB(255, 75, 75)
 				elseif isPlasma and elapsed >= 1.2 then
-					label.Text = string.format("TARGET DUMMY • %d / 300 HP [⚡ ELECTRIFIED]", currentHpInt)
+					label.Text = string.format(
+						"TARGET DUMMY • %d / %d HP [⚡ ELECTRIFIED]",
+						currentHpInt,
+						CombatPresentation.DummyMaxHp
+					)
 					label.TextColor3 = Color3.fromRGB(120, 230, 255)
 				elseif isToxic and elapsed >= 0.9 then
-					label.Text = string.format("TARGET DUMMY • %d / 300 HP [☣ POISONED]", currentHpInt)
+					label.Text = string.format(
+						"TARGET DUMMY • %d / %d HP [☣ POISONED]",
+						currentHpInt,
+						CombatPresentation.DummyMaxHp
+					)
 					label.TextColor3 = Color3.fromRGB(220, 130, 255)
 				else
-					label.Text = string.format("TARGET DUMMY • %d / 300 HP", currentHpInt)
+					label.Text = string.format(
+						"TARGET DUMMY • %d / %d HP",
+						currentHpInt,
+						CombatPresentation.DummyMaxHp
+					)
 					label.TextColor3 = Color3.fromRGB(240, 245, 250)
 				end
 			end

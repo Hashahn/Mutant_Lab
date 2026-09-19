@@ -63,10 +63,6 @@ tools.json            версии и контрольные суммы
 ```
 
 ## Git и передача проекта
-Локальная история находится в .git. Удалённая копия пока не подключена.
-Создайте пустой **private** репозиторий в своём GitHub/GitLab, затем:
-```powershell
-git remote add origin <URL-вашего-репозитория>
-git push -u origin HEAD
-```
+Репозиторий: [Hashahn/Mutant_Lab](https://github.com/Hashahn/Mutant_Lab). Origin подключён. Перед продолжением проверьте текущую ветку и STATUS.
+
 Не добавляйте в Git .tools, build, ключи, токены и личные файлы. Следующему агенту достаточно клонировать репозиторий и прочитать AGENTS.md + docs/HANDOFF.md.

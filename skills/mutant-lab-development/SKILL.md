@@ -12,7 +12,7 @@ Preserve these project-specific invariants:
 - Only the server's battle record determines completion and reward. Cancel pending battle on leave.
 - Studio memory mode is the default. Persistent tests need a separate test experience; a second place in a production experience is insufficient isolation.
 - Failed/corrupt/future-version loads must not be saved as a fresh profile. A stale session must never overwrite a newer owner.
-- Two tiers cannot merge forever. Preserve a usable inventory escape via confirmed release, with no refund and no release of the last or battling mutant.
+- There are three tiers: Blob, Toxic Blob and Plasma Blob. Plasma cannot merge further. The tutorial accepts a Toxic or Plasma battle so early evolution cannot strand a profile. Preserve a usable inventory escape via confirmed release, with no refund and no release of the last or battling mutant.
 - All delegated subagents use gpt-5.6-sol as requested by the project owner.
 
 Use scripts/check.ps1 for automation. It runs formatting, Lune tests and Rojo build; it does not certify Studio GUI, engine APIs, real DataStore concurrency or analytics delivery. Follow docs/MANUAL_TESTS.md for those checks. Add regression tests for meaningful economy/security changes.

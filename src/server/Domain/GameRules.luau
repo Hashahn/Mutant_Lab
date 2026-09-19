@@ -166,7 +166,11 @@ function GameRules:StartBattle(profile: any, battle: any, mutantId: any, now: an
 	if mutant == nil then
 		return false, "MUTANT_NOT_FOUND", nil
 	end
-	if not profile.Tutorial.TutorialCompleted and mutant.Type ~= "ToxicBlob" then
+	if
+		not profile.Tutorial.TutorialCompleted
+		and mutant.Type ~= "ToxicBlob"
+		and mutant.Type ~= "PlasmaBlob"
+	then
 		return false, "TUTORIAL_REQUIRED", nil
 	end
 	local definition = self._mutantConfig[mutant.Type]

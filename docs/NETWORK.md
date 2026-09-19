@@ -8,5 +8,5 @@ Snapshot: {BioCoins, SlotsUnlocked, Mutants = {{Id, Type, Tier, Level}}, Tutoria
 Battle timestamps use workspace:GetServerTimeNow() seconds; no battle is false. Mutants are ordered arrays. Snapshots are copies; session token and stored lock must never be transmitted.
 StateChanged notice: {Code = "BATTLE_COMPLETE", Reward = number}. Revision increases within session. UI ignores older snapshots.
 No caller-supplied user ID, amount, price, type or reward. Server validates types and lengths. Shared rate limit applies to both functions.
-First two successful creates are free (persisted count), never replenish on reconnect. First battle requires tutorial merge; tutorial completes on ToxicBlob battle reward. No merge/release involving battling mutant. One active battle per player; no client completion remote.
+First two successful creates are free (persisted count), never replenish on reconnect. First battle requires tutorial merge; the first battle accepts ToxicBlob or PlasmaBlob, and either completes the tutorial on reward. Blob battles require completed tutorial. No merge/release involving battling mutant. One active battle per player; no client completion remote.
 

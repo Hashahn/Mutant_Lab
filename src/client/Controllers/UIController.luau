@@ -612,7 +612,7 @@ function UIController:_tutorialHint()
 		if type(self._state.Battle) == "table" then
 			return "Training in progress! Watch the combat dummy in the chamber."
 		end
-		return "Step 3: Click your Toxic Blob card to select it, then click START TRAINING."
+		return "Step 3: Select your Toxic Blob or Plasma Blob, then click START TRAINING."
 	end
 	return "Tutorial complete! Grow your collection, synthesize mutations and train mutants."
 end

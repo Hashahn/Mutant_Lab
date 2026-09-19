@@ -152,6 +152,45 @@ local plasmaId = plasmaProfile.Mutants[1].Id
 ok, code, battle = plasmaRules:StartBattle(plasmaProfile, false, plasmaId, 500)
 expect(ok and code == "OK" and battle.Reward == 85, "plasma battle reward wrong")
 
+-- Spending all starting coins before the first battle can produce a PlasmaBlob.
+-- That progression must still have a valid tutorial exit and only reward once.
+local plasmaTutorialProfile = GameState.newProfile(GameConfig)
+local plasmaTutorialRules = newRules()
+for _ = 1, 4 do
+	ok, code = plasmaTutorialRules:CreateBlob(plasmaTutorialProfile, false)
+	expect(ok and code == "OK", "plasma tutorial create failed")
+end
+expect(plasmaTutorialProfile.BioCoins == 0, "four tutorial creates must spend all starting coins")
+ok, code = plasmaTutorialRules:Merge(plasmaTutorialProfile, false, "id-1", "id-2")
+expect(ok and code == "OK", "first plasma tutorial merge failed")
+ok, code = plasmaTutorialRules:StartBattle(plasmaTutorialProfile, false, "id-3", 600)
+expectCode(ok, code, "TUTORIAL_REQUIRED")
+ok, code = plasmaTutorialRules:Merge(plasmaTutorialProfile, false, "id-3", "id-4")
+expect(ok and code == "OK", "second plasma tutorial merge failed")
+ok, code = plasmaTutorialRules:Merge(plasmaTutorialProfile, false, "id-5", "id-6")
+expect(ok and code == "OK", "final plasma tutorial merge failed")
+expect(
+	GameState.validateProfile(plasmaTutorialProfile, GameConfig, MutantConfig),
+	"plasma-only tutorial profile must validate"
+)
+local tutorialPlasmaId = plasmaTutorialProfile.Mutants[1].Id
+local tutorialPlasmaBattle
+ok, code, tutorialPlasmaBattle =
+	plasmaTutorialRules:StartBattle(plasmaTutorialProfile, false, tutorialPlasmaId, 700)
+expect(ok and code == "OK" and tutorialPlasmaBattle.Reward == 85, "first PlasmaBlob tutorial battle failed")
+local plasmaCompletionOk, plasmaCompletionCode, plasmaReward =
+	plasmaTutorialRules:CompleteBattle(plasmaTutorialProfile, tutorialPlasmaBattle, 706)
+expect(
+	plasmaCompletionOk and plasmaCompletionCode == "OK" and plasmaReward == 85,
+	"first PlasmaBlob tutorial reward wrong"
+)
+expect(plasmaTutorialProfile.BioCoins == 85, "first PlasmaBlob tutorial reward not applied")
+expect(plasmaTutorialProfile.Tutorial.TutorialCompleted, "PlasmaBlob battle did not complete tutorial")
+local duplicatePlasmaOk, duplicatePlasmaCode =
+	plasmaTutorialRules:CompleteBattle(plasmaTutorialProfile, tutorialPlasmaBattle, 800)
+expectCode(duplicatePlasmaOk, duplicatePlasmaCode, "INVALID_REQUEST")
+expect(plasmaTutorialProfile.BioCoins == 85, "PlasmaBlob tutorial battle rewarded twice")
+
 -- Battle is transient, enforces the tutorial order, and rewards exactly once.
 local gatedProfile = GameState.newProfile(GameConfig)
 local gatedRules = newRules()
