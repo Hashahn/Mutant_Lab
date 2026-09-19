@@ -15,6 +15,7 @@ local network
 local world = WorldController.new()
 world:Start()
 
+local ui
 ui = UIController.new({
 	OnAction = function(action, payload)
 		if network and not network:Request(action, payload) then

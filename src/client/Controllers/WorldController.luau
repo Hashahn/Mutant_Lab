@@ -12,7 +12,17 @@ local COLORS = {
 	Cyan = Color3.fromRGB(71, 230, 210),
 	Toxic = Color3.fromRGB(178, 255, 43),
 	Purple = Color3.fromRGB(174, 91, 255),
+	Orange = Color3.fromRGB(255, 164, 73),
+	Red = Color3.fromRGB(241, 91, 102),
+	Lime = Color3.fromRGB(166, 244, 83),
 }
+
+local function addCorner(parent, radius)
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, radius or 8)
+	corner.Parent = parent
+	return corner
+end
 
 local function part(parent, name, size, cframe, color, material)
 	local item = Instance.new("Part")
@@ -30,7 +40,7 @@ local function part(parent, name, size, cframe, color, material)
 	return item
 end
 
-local function labelOn(parent, text, offset)
+local function labelOn(parent, text, offset, textColor)
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "Label"
 	gui.Size = UDim2.fromOffset(150, 34)
@@ -41,7 +51,7 @@ local function labelOn(parent, text, offset)
 	textLabel.Size = UDim2.fromScale(1, 1)
 	textLabel.BackgroundTransparency = 0.2
 	textLabel.BackgroundColor3 = COLORS.Ink
-	textLabel.TextColor3 = Color3.new(1, 1, 1)
+	textLabel.TextColor3 = textColor or Color3.new(1, 1, 1)
 	textLabel.Font = Enum.Font.GothamBold
 	textLabel.TextScaled = true
 	textLabel.Text = text
@@ -84,6 +94,12 @@ local function spawnDamagePopup(parent, text, position)
 	local startClock = os.clock()
 	local conn
 	conn = RunService.RenderStepped:Connect(function()
+		if not popupPart or not popupPart.Parent then
+			if conn then
+				conn:Disconnect()
+			end
+			return
+		end
 		local elapsed = os.clock() - startClock
 		if elapsed >= 0.75 then
 			conn:Disconnect()
@@ -165,14 +181,51 @@ local function makeBlob(parent, mutant, at, order)
 	return model
 end
 
-local function makeDummy(parent)
+local function makeHologramPlaceholder(parent, mutant, at, order)
+	local model = Instance.new("Model")
+	model.Name = tostring(mutant.Id)
+	model:SetAttribute("MutantId", mutant.Id)
+	model:SetAttribute("Order", order or 1)
+	model:SetAttribute("IsHologram", true)
+
+	local ghost = part(
+		model,
+		"Ghost",
+		Vector3.new(2.8, 2.3, 2.8),
+		at * CFrame.new(0, 1.4, 0),
+		COLORS.Cyan,
+		Enum.Material.ForceField
+	)
+	ghost.Shape = Enum.PartType.Ball
+	ghost.Transparency = 0.55
+	model.PrimaryPart = ghost
+
+	local ring = part(
+		model,
+		"HoloRing",
+		Vector3.new(3.8, 0.08, 3.8),
+		at * CFrame.new(0, 0.25, 0),
+		COLORS.Orange,
+		Enum.Material.Neon
+	)
+	ring.Shape = Enum.PartType.Cylinder
+	ring.CFrame = at * CFrame.new(0, 0.25, 0) * CFrame.Angles(0, 0, math.pi / 2)
+
+	local displayName = if mutant.Type == "ToxicBlob" then "TOXIC BLOB" else "BLOB"
+	labelOn(ghost, string.format("%s  •  IN TRAINING", displayName), Vector3.new(0, 2.4, 0), COLORS.Orange)
+	model.Parent = parent
+	return model
+end
+
+local function makeDummy(parent, at)
+	local baseCFrame = at or CFrame.new(0.5, 0.9, 8)
 	local model = Instance.new("Model")
 	model.Name = "CombatDummy"
 	local root = part(
 		model,
 		"Root",
 		Vector3.new(1.8, 3.6, 1.4),
-		CFrame.new(3, 2.2, 8),
+		baseCFrame * CFrame.new(0, 1.8, 0),
 		Color3.fromRGB(224, 112, 70),
 		Enum.Material.Wood
 	)
@@ -181,7 +234,7 @@ local function makeDummy(parent)
 		model,
 		"Head",
 		Vector3.new(1.8, 1.8, 1.8),
-		CFrame.new(3, 4.8, 8),
+		baseCFrame * CFrame.new(0, 4.5, 0),
 		Color3.fromRGB(238, 153, 81),
 		Enum.Material.Wood
 	)
@@ -191,7 +244,7 @@ local function makeDummy(parent)
 			model,
 			"Arm",
 			Vector3.new(0.65, 3, 0.65),
-			CFrame.new(3 + x, 2.4, 8),
+			baseCFrame * CFrame.new(x, 2.1, 0),
 			Color3.fromRGB(117, 75, 53),
 			Enum.Material.Wood
 		)
@@ -298,12 +351,37 @@ function WorldController:Start()
 	)
 	part(
 		architecture,
-		"Bench",
-		Vector3.new(20, 1, 4),
-		CFrame.new(-3, 1, 8),
+		"ArenaPlatform",
+		Vector3.new(15, 0.8, 6),
+		CFrame.new(-3, 0.5, 8),
 		COLORS.Metal,
 		Enum.Material.Metal
 	)
+	part(
+		architecture,
+		"ArenaRim",
+		Vector3.new(15.4, 0.12, 6.4),
+		CFrame.new(-3, 0.91, 8),
+		COLORS.Orange,
+		Enum.Material.Neon
+	)
+	part(
+		architecture,
+		"ArenaCenterLine",
+		Vector3.new(0.25, 0.05, 5.8),
+		CFrame.new(-3, 0.93, 8),
+		Color3.fromRGB(255, 205, 110),
+		Enum.Material.Neon
+	)
+	local chamberSign = part(
+		architecture,
+		"ChamberSign",
+		Vector3.new(6.5, 1.2, 0.2),
+		CFrame.new(-3, 7.8, 13.4),
+		COLORS.Ink,
+		Enum.Material.SmoothPlastic
+	)
+	labelOn(chamberSign, "TEST CHAMBER // SECTOR 1", Vector3.new(0, 0, 0.2), COLORS.Orange)
 	for index = 1, 6 do
 		local x = -13 + (index - 1) * 5.1
 		part(
@@ -443,10 +521,17 @@ function WorldController:SetState(snapshot)
 	if not self._display or not self._battleFolder then
 		return
 	end
+	local battlingMutantId = if type(snapshot.Battle) == "table" then snapshot.Battle.MutantId else nil
+
 	self:_clear(self._display)
 	for index, mutant in snapshot.Mutants or {} do
 		if index <= 6 then
-			makeBlob(self._display, mutant, CFrame.new(-13 + (index - 1) * 5.1, 0.5, 3), index)
+			local padCFrame = CFrame.new(-13 + (index - 1) * 5.1, 0.5, 3)
+			if mutant.Id == battlingMutantId then
+				makeHologramPlaceholder(self._display, mutant, padCFrame, index)
+			else
+				makeBlob(self._display, mutant, padCFrame, index)
+			end
 		end
 	end
 	self:_updateSelectionHighlights()
@@ -454,7 +539,7 @@ function WorldController:SetState(snapshot)
 	self._battle = snapshot.Battle
 	self:_clear(self._battleFolder)
 	if type(snapshot.Battle) == "table" then
-		makeDummy(self._battleFolder)
+		makeDummy(self._battleFolder, CFrame.new(0.5, 0.9, 8))
 		local fighter = nil
 		for _, mutant in snapshot.Mutants or {} do
 			if mutant.Id == snapshot.Battle.MutantId then
@@ -463,7 +548,7 @@ function WorldController:SetState(snapshot)
 			end
 		end
 		if fighter then
-			makeBlob(self._battleFolder, fighter, CFrame.new(-3, 0.5, 8), 1)
+			makeBlob(self._battleFolder, fighter, CFrame.new(-6.5, 0.9, 8), 1)
 		end
 	end
 end
@@ -522,8 +607,8 @@ function WorldController:_animateBattle()
 
 	if dummy and dummy.PrimaryPart then
 		dummy:PivotTo(
-			CFrame.new(3, 2.2 + math.max(0, pulse) * 0.12, 8)
-				* CFrame.Angles(0, 0, pulse * 0.06 * (1 - progress))
+			CFrame.new(0.5, 2.7 + math.max(0, pulse) * 0.14, 8)
+				* CFrame.Angles(0, 0, pulse * 0.08 * (1 - progress))
 		)
 
 		local hpGui = dummy:FindFirstChild("Head") and dummy.Head:FindFirstChild("DummyHP")
@@ -551,17 +636,17 @@ function WorldController:_animateBattle()
 				h.Adornee = dummy
 				h.Parent = dummy
 			end
-			if now - self._lastDamagePopupTime > 0.7 then
+			if now - self._lastDamagePopupTime > 0.65 then
 				self._lastDamagePopupTime = now
 				local reward = (self._battle and self._battle.Reward) or 15
-				spawnDamagePopup(self._battleFolder, string.format("-%d", reward), Vector3.new(3, 5.2, 8))
+				spawnDamagePopup(self._battleFolder, string.format("-%d", reward), Vector3.new(0.5, 5.8, 8))
 			end
 		elseif flash then
 			flash:Destroy()
 		end
 	end
 	if fighter and fighter.PrimaryPart then
-		fighter:PivotTo(CFrame.new(-3 + lunge * 2, 2 + lunge * 0.25, 8))
+		fighter:PivotTo(CFrame.new(-6.5 + lunge * 4.2, 2.3 + lunge * 0.45, 8))
 	end
 end
 

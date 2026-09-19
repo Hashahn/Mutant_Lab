@@ -15,4 +15,20 @@ local function walk(path)
 end
 walk("src")
 assert(count > 0)
+
+-- Static check: ensure all COLORS.<Color> used in WorldController exist in its COLORS table
+local worldCode = fs.readFile("src/client/Controllers/WorldController.luau")
+local colorsBlock = string.match(worldCode, "local COLORS = {([^}]+)}")
+assert(colorsBlock, "Could not find COLORS table in WorldController.luau")
+local knownColors = {}
+for key in string.gmatch(colorsBlock, "([%a%d_]+)%s*=") do
+	knownColors[key] = true
+end
+for usedColor in string.gmatch(worldCode, "COLORS%.([%a%d_]+)") do
+	assert(
+		knownColors[usedColor],
+		string.format("Unknown color COLORS.%s in WorldController.luau", usedColor)
+	)
+end
+
 print(string.format("PASS Luau compiler: %d source files (syntax only, not engine/type validation)", count))
