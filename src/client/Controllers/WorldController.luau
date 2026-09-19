@@ -325,19 +325,24 @@ function WorldController:Start()
 		table.insert(self._lightingEffects, cc)
 	end)
 
-	local function tuckCharacter(char)
+	local function hideLocalCharacter(char)
 		task.spawn(function()
-			local rootPart = char:WaitForChild("HumanoidRootPart", 5)
-			if rootPart and rootPart:IsA("BasePart") then
-				rootPart.CFrame = CFrame.new(-3, 2, -45)
-				rootPart.Anchored = true
+			for _, desc in char:GetDescendants() do
+				if desc:IsA("BasePart") or desc:IsA("Decal") then
+					desc.LocalTransparencyModifier = 1
+				end
 			end
+			char.DescendantAdded:Connect(function(desc)
+				if desc:IsA("BasePart") or desc:IsA("Decal") then
+					desc.LocalTransparencyModifier = 1
+				end
+			end)
 		end)
 	end
 	if Players.LocalPlayer.Character then
-		tuckCharacter(Players.LocalPlayer.Character)
+		hideLocalCharacter(Players.LocalPlayer.Character)
 	end
-	Players.LocalPlayer.CharacterAdded:Connect(tuckCharacter)
+	Players.LocalPlayer.CharacterAdded:Connect(hideLocalCharacter)
 
 	local architecture = Instance.new("Folder")
 	architecture.Name = "Architecture"
@@ -483,6 +488,13 @@ function WorldController:Start()
 	end
 
 	self._renderConnection = RunService.RenderStepped:Connect(function()
+		local cam = workspace.CurrentCamera
+		if cam then
+			if cam.CameraType ~= Enum.CameraType.Scriptable then
+				cam.CameraType = Enum.CameraType.Scriptable
+			end
+			cam.CFrame = CFrame.lookAt(Vector3.new(-3, 16, -30), Vector3.new(-3, 3.2, 6))
+		end
 		self:_animateBlobs()
 		self:_animateBattle()
 	end)
