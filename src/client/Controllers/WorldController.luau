@@ -24,7 +24,7 @@ local function addCorner(parent, radius)
 	return corner
 end
 
-local function part(parent, name, size, cframe, color, material)
+local function part(parent, name, size, cframe, color, material, canCollide)
 	local item = Instance.new("Part")
 	item.Name = name
 	item.Size = size
@@ -32,7 +32,7 @@ local function part(parent, name, size, cframe, color, material)
 	item.Color = color
 	item.Material = material or Enum.Material.SmoothPlastic
 	item.Anchored = true
-	item.CanCollide = false
+	item.CanCollide = canCollide == true
 	item.CanQuery = false
 	item.CanTouch = false
 	item.CastShadow = false
@@ -461,36 +461,84 @@ function WorldController:Start()
 		table.insert(self._lightingEffects, cc)
 	end)
 
-	local function hideLocalCharacter(char)
+	local function onCharacterAdded(char)
 		task.spawn(function()
+			local hrp = char:WaitForChild("HumanoidRootPart", 5)
+			if hrp and hrp:IsA("BasePart") then
+				if hrp.Position.Y < 0 or (hrp.Position - Vector3.new(-3, 3, -10)).Magnitude > 60 then
+					hrp.CFrame = CFrame.new(-3, 3, -10)
+				end
+			end
 			for _, desc in char:GetDescendants() do
 				if desc:IsA("BasePart") or desc:IsA("Decal") then
-					desc.LocalTransparencyModifier = 1
+					desc.LocalTransparencyModifier = 0
 				end
 			end
 			char.DescendantAdded:Connect(function(desc)
 				if desc:IsA("BasePart") or desc:IsA("Decal") then
-					desc.LocalTransparencyModifier = 1
+					desc.LocalTransparencyModifier = 0
 				end
 			end)
 		end)
 	end
 	if Players.LocalPlayer.Character then
-		hideLocalCharacter(Players.LocalPlayer.Character)
+		onCharacterAdded(Players.LocalPlayer.Character)
 	end
-	Players.LocalPlayer.CharacterAdded:Connect(hideLocalCharacter)
+	Players.LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
 
 	local architecture = Instance.new("Folder")
 	architecture.Name = "Architecture"
 	architecture.Parent = root
+
+	-- Solid Laboratory Floor with collision
+	part(
+		architecture,
+		"Floor",
+		Vector3.new(48, 2, 44),
+		CFrame.new(-3, -1, 0),
+		Color3.fromRGB(28, 36, 44),
+		Enum.Material.SmoothPlastic,
+		true
+	)
+
+	-- Perimeter Walls with collision
 	part(
 		architecture,
 		"BackWall",
-		Vector3.new(32, 12, 1),
-		CFrame.new(0, 6, 14),
+		Vector3.new(48, 14, 2),
+		CFrame.new(-3, 6, 15),
 		COLORS.Ink,
-		Enum.Material.Metal
+		Enum.Material.Metal,
+		true
 	)
+	part(
+		architecture,
+		"FrontWall",
+		Vector3.new(48, 8, 2),
+		CFrame.new(-3, 3, -22),
+		Color3.fromRGB(34, 44, 52),
+		Enum.Material.Metal,
+		true
+	)
+	part(
+		architecture,
+		"LeftWall",
+		Vector3.new(2, 14, 44),
+		CFrame.new(-27, 6, 0),
+		Color3.fromRGB(34, 44, 52),
+		Enum.Material.Metal,
+		true
+	)
+	part(
+		architecture,
+		"RightWall",
+		Vector3.new(2, 14, 44),
+		CFrame.new(21, 6, 0),
+		Color3.fromRGB(34, 44, 52),
+		Enum.Material.Metal,
+		true
+	)
+
 	part(
 		architecture,
 		"LightStrip",
@@ -505,7 +553,8 @@ function WorldController:Start()
 		Vector3.new(15, 0.8, 6),
 		CFrame.new(-3, 0.5, 8),
 		COLORS.Metal,
-		Enum.Material.Metal
+		Enum.Material.Metal,
+		true
 	)
 	part(
 		architecture,
@@ -540,7 +589,8 @@ function WorldController:Start()
 			Vector3.new(4.2, 0.35, 4.2),
 			CFrame.new(x, 0.3, 3),
 			Color3.fromRGB(34, 46, 54),
-			Enum.Material.Metal
+			Enum.Material.Metal,
+			true
 		)
 		local glowColor = if index % 2 == 0 then COLORS.Purple else COLORS.Cyan
 		local padGlow = part(
@@ -616,21 +666,17 @@ function WorldController:Start()
 	local camera = workspace.CurrentCamera
 	if camera then
 		self._camera = camera
-		self._previousCameraType = camera.CameraType
-		self._previousCameraSubject = camera.CameraSubject
-		self._previousCameraCFrame = camera.CFrame
-		camera.CameraType = Enum.CameraType.Scriptable
-		camera.CFrame = CFrame.lookAt(Vector3.new(-3, 16, -30), Vector3.new(-3, 3.2, 6))
+		camera.CameraType = Enum.CameraType.Custom
+		local char = Players.LocalPlayer.Character
+		if char then
+			local hum = char:FindFirstChildOfClass("Humanoid")
+			if hum then
+				camera.CameraSubject = hum
+			end
+		end
 	end
 
 	self._renderConnection = RunService.RenderStepped:Connect(function()
-		local cam = workspace.CurrentCamera
-		if cam then
-			if cam.CameraType ~= Enum.CameraType.Scriptable then
-				cam.CameraType = Enum.CameraType.Scriptable
-			end
-			cam.CFrame = CFrame.lookAt(Vector3.new(-3, 16, -30), Vector3.new(-3, 3.2, 6))
-		end
 		self:_animateBlobs()
 		self:_animateBattle()
 		if self._activeMerge then
