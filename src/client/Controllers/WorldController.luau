@@ -61,7 +61,7 @@ local function labelOn(parent, text, offset, textColor)
 	corner.Parent = textLabel
 end
 
-local function spawnDamagePopup(parent, text, position)
+local function spawnDamagePopup(parent, text, position, textColor, strokeColor)
 	local popupPart = Instance.new("Part")
 	popupPart.Name = "DamagePopup"
 	popupPart.Transparency = 1
@@ -73,7 +73,7 @@ local function spawnDamagePopup(parent, text, position)
 	popupPart.Parent = parent
 
 	local gui = Instance.new("BillboardGui")
-	gui.Size = UDim2.fromOffset(120, 36)
+	gui.Size = UDim2.fromOffset(150, 36)
 	gui.AlwaysOnTop = true
 	gui.Parent = popupPart
 
@@ -81,13 +81,13 @@ local function spawnDamagePopup(parent, text, position)
 	label.Size = UDim2.fromScale(1, 1)
 	label.BackgroundTransparency = 1
 	label.Text = text
-	label.TextColor3 = Color3.fromRGB(255, 215, 60)
+	label.TextColor3 = textColor or Color3.fromRGB(255, 215, 60)
 	label.Font = Enum.Font.GothamBlack
 	label.TextScaled = true
 	label.Parent = gui
 
 	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(180, 45, 25)
+	stroke.Color = strokeColor or Color3.fromRGB(180, 45, 25)
 	stroke.Thickness = 2
 	stroke.Parent = label
 
@@ -279,7 +279,7 @@ local function makeDummy(parent, at)
 	hpLabel.Name = "Label"
 	hpLabel.Size = UDim2.new(1, 0, 0, 18)
 	hpLabel.BackgroundTransparency = 1
-	hpLabel.Text = "TARGET DUMMY • 100%"
+	hpLabel.Text = "TARGET DUMMY • 300 / 300 HP"
 	hpLabel.TextColor3 = Color3.fromRGB(240, 245, 250)
 	hpLabel.Font = Enum.Font.GothamBold
 	hpLabel.TextSize = 12
@@ -302,7 +302,8 @@ function WorldController.new()
 	self._previousCameraCFrame = nil
 	self._lastDamagePopupTime = 0
 	self._lastHitIndex = 0
-	self._displayedHp = 1.0
+	self._displayedHp = 300
+	self._battlingMutantType = "Blob"
 	self._lightingEffects = {}
 	return self
 end
@@ -559,7 +560,8 @@ function WorldController:SetState(snapshot)
 
 	self._battle = snapshot.Battle
 	self._lastHitIndex = 0
-	self._displayedHp = 1.0
+	self._displayedHp = 300
+	self._battlingMutantType = "Blob"
 	self:_clear(self._battleFolder)
 	if type(snapshot.Battle) == "table" then
 		makeDummy(self._battleFolder, CFrame.new(0.5, 0.9, 8))
@@ -567,6 +569,7 @@ function WorldController:SetState(snapshot)
 		for _, mutant in snapshot.Mutants or {} do
 			if mutant.Id == snapshot.Battle.MutantId then
 				fighter = mutant
+				self._battlingMutantType = mutant.Type
 				break
 			end
 		end
@@ -625,51 +628,136 @@ function WorldController:_animateBattle()
 	local now = workspace:GetServerTimeNow()
 	local duration = math.max(0.1, self._battle.EndsAt - self._battle.StartedAt)
 	local elapsed = math.clamp(now - self._battle.StartedAt, 0, duration)
+	local isToxic = (self._battlingMutantType == "ToxicBlob")
 
 	local currentHit = 0
-	local targetHp = 1.0
-	if elapsed >= 4.6 then
-		currentHit = 4
-		targetHp = 0.0
-	elseif elapsed >= 3.4 then
-		currentHit = 3
-		targetHp = 0.25
-	elseif elapsed >= 2.2 then
-		currentHit = 2
-		targetHp = 0.50
-	elseif elapsed >= 1.0 then
-		currentHit = 1
-		targetHp = 0.75
-	end
-
-	if currentHit > (self._lastHitIndex or 0) then
-		self._lastHitIndex = currentHit
-		local reward = (self._battle and self._battle.Reward) or 35
-		local chunk = math.floor(reward / 4)
-		local popupText
-		if currentHit == 4 then
-			local remainder = reward - (chunk * 3)
-			popupText = string.format("CRIT! -%d", remainder)
-		else
-			popupText = string.format("-%d", chunk)
-		end
-		spawnDamagePopup(self._battleFolder, popupText, Vector3.new(0.5, 5.8, 8))
-	end
-
+	local targetHp = 300
 	local isImpact = false
-	for _, hitTime in { 1.0, 2.2, 3.4, 4.6 } do
-		if elapsed >= hitTime and elapsed <= hitTime + 0.22 then
-			isImpact = true
-			break
+
+	if isToxic then
+		-- Toxic Blob: Heavy strikes + 5 ticking poison procs!
+		if elapsed >= 5.0 then
+			currentHit = 8
+			targetHp = 0
+		elseif elapsed >= 4.5 then
+			currentHit = 7
+			targetHp = 60
+		elseif elapsed >= 3.9 then
+			currentHit = 6
+			targetHp = 130
+		elseif elapsed >= 3.3 then
+			currentHit = 5
+			targetHp = 150
+		elseif elapsed >= 2.7 then
+			currentHit = 4
+			targetHp = 170
+		elseif elapsed >= 2.1 then
+			currentHit = 3
+			targetHp = 225
+		elseif elapsed >= 1.5 then
+			currentHit = 2
+			targetHp = 240
+		elseif elapsed >= 0.9 then
+			currentHit = 1
+			targetHp = 255
+		end
+
+		for _, hitTime in { 0.9, 2.7, 4.5 } do
+			if elapsed >= hitTime and elapsed <= hitTime + 0.22 then
+				isImpact = true
+				break
+			end
+		end
+
+		if currentHit > (self._lastHitIndex or 0) then
+			self._lastHitIndex = currentHit
+			if currentHit == 1 then
+				spawnDamagePopup(
+					self._battleFolder,
+					"-45",
+					Vector3.new(0.5, 5.8, 8),
+					Color3.fromRGB(178, 255, 43)
+				)
+			elseif currentHit == 2 or currentHit == 3 then
+				spawnDamagePopup(
+					self._battleFolder,
+					"☣ -15 POISON",
+					Vector3.new(0.5, 6.2, 8),
+					Color3.fromRGB(210, 110, 255),
+					Color3.fromRGB(80, 20, 110)
+				)
+			elseif currentHit == 4 then
+				spawnDamagePopup(
+					self._battleFolder,
+					"-55",
+					Vector3.new(0.5, 5.8, 8),
+					Color3.fromRGB(178, 255, 43)
+				)
+			elseif currentHit == 5 or currentHit == 6 then
+				spawnDamagePopup(
+					self._battleFolder,
+					"☣ -20 POISON",
+					Vector3.new(0.5, 6.2, 8),
+					Color3.fromRGB(210, 110, 255),
+					Color3.fromRGB(80, 20, 110)
+				)
+			elseif currentHit == 7 then
+				spawnDamagePopup(
+					self._battleFolder,
+					"☣ TOXIC SLAM! -70",
+					Vector3.new(0.5, 5.8, 8),
+					Color3.fromRGB(255, 120, 40),
+					Color3.fromRGB(140, 40, 10)
+				)
+			elseif currentHit == 8 then
+				spawnDamagePopup(
+					self._battleFolder,
+					"☣ FATAL POISON! -60",
+					Vector3.new(0.5, 6.4, 8),
+					Color3.fromRGB(255, 60, 60),
+					Color3.fromRGB(110, 15, 15)
+				)
+			end
+		end
+	else
+		-- Normal Blob: 4 physical body slams, leaves dummy with 120/300 HP standing!
+		if elapsed >= 4.6 then
+			currentHit = 4
+			targetHp = 120
+		elseif elapsed >= 3.4 then
+			currentHit = 3
+			targetHp = 165
+		elseif elapsed >= 2.2 then
+			currentHit = 2
+			targetHp = 210
+		elseif elapsed >= 1.0 then
+			currentHit = 1
+			targetHp = 255
+		end
+
+		for _, hitTime in { 1.0, 2.2, 3.4, 4.6 } do
+			if elapsed >= hitTime and elapsed <= hitTime + 0.22 then
+				isImpact = true
+				break
+			end
+		end
+
+		if currentHit > (self._lastHitIndex or 0) then
+			self._lastHitIndex = currentHit
+			local dmg = if currentHit == 4 then "-25" else "-20"
+			spawnDamagePopup(self._battleFolder, dmg, Vector3.new(0.5, 5.8, 8), Color3.fromRGB(255, 215, 60))
 		end
 	end
 
-	self._displayedHp = self._displayedHp or 1.0
+	-- Smooth HP transition
+	self._displayedHp = self._displayedHp or 300
 	self._displayedHp = self._displayedHp + (targetHp - self._displayedHp) * 0.14
-	local hpPercent = math.clamp(self._displayedHp, 0, 1)
+	local currentHpInt = math.clamp(math.ceil(self._displayedHp), 0, 300)
+	local hpFraction = currentHpInt / 300
 
+	-- Animate Dummy
 	if dummy and dummy.PrimaryPart then
-		local isKnockedOut = elapsed >= 4.8
+		local isKnockedOut = isToxic and elapsed >= 5.0
 		local tiltAngle = 0
 		local dummyY = 2.7
 		local dummyX = 0.5
@@ -694,28 +782,48 @@ function WorldController:_animateBattle()
 			local fill = hpGui:FindFirstChild("Background") and hpGui.Background:FindFirstChild("Fill")
 			local label = hpGui:FindFirstChild("Label")
 			if fill then
-				fill.Size = UDim2.new(hpPercent, 0, 1, 0)
-				fill.BackgroundColor3 = Color3.fromHSV(hpPercent * 0.33, 0.85, 0.95)
+				fill.Size = UDim2.new(hpFraction, 0, 1, 0)
+				fill.BackgroundColor3 = Color3.fromHSV(hpFraction * 0.33, 0.85, 0.95)
 			end
 			if label then
-				if isKnockedOut or hpPercent < 0.03 then
-					label.Text = "TARGET DUMMY • 0% [KO]"
-					label.TextColor3 = Color3.fromRGB(255, 90, 90)
+				if isKnockedOut then
+					label.Text = "TARGET DUMMY • 0 / 300 HP [KO]"
+					label.TextColor3 = Color3.fromRGB(255, 75, 75)
+				elseif isToxic and elapsed >= 0.9 then
+					label.Text = string.format("TARGET DUMMY • %d / 300 HP [☣ POISONED]", currentHpInt)
+					label.TextColor3 = Color3.fromRGB(220, 130, 255)
 				else
-					label.Text = string.format("TARGET DUMMY • %d%%", math.ceil(hpPercent * 100))
+					label.Text = string.format("TARGET DUMMY • %d / 300 HP", currentHpInt)
 					label.TextColor3 = Color3.fromRGB(240, 245, 250)
 				end
 			end
 		end
 
+		-- Hit flash / Poison Highlight
 		local flash = dummy:FindFirstChild("CombatFlash")
+		local isPoisonTick = isToxic
+			and (currentHit == 2 or currentHit == 3 or currentHit == 5 or currentHit == 6 or currentHit == 8)
+			and (elapsed % 0.6 < 0.2)
+
 		if isImpact then
 			if not flash then
 				local h = Instance.new("Highlight")
 				h.Name = "CombatFlash"
-				h.FillColor = Color3.fromRGB(255, 70, 70)
+				h.FillColor = if isToxic then Color3.fromRGB(178, 255, 43) else Color3.fromRGB(255, 70, 70)
 				h.FillTransparency = 0.25
 				h.OutlineTransparency = 0.4
+				h.Adornee = dummy
+				h.Parent = dummy
+			end
+		elseif
+			isPoisonTick or (isToxic and elapsed >= 0.9 and not isKnockedOut and math.sin(now * 8) > 0.4)
+		then
+			if not flash then
+				local h = Instance.new("Highlight")
+				h.Name = "CombatFlash"
+				h.FillColor = Color3.fromRGB(190, 60, 255)
+				h.FillTransparency = 0.45
+				h.OutlineTransparency = 0.6
 				h.Adornee = dummy
 				h.Parent = dummy
 			end
@@ -724,42 +832,88 @@ function WorldController:_animateBattle()
 		end
 	end
 
+	-- Animate Fighter
 	if fighter and fighter.PrimaryPart then
 		local fX = -6.5
 		local fY = 2.3
 
-		if elapsed >= 4.8 then
-			local victoryWave = math.sin((elapsed - 4.8) * 9)
-			fY = 2.3 + math.max(0, victoryWave) * 0.45
-			fX = -6.5
-		elseif elapsed >= 4.0 then
-			local t = (elapsed - 4.0) / 0.6
-			if t <= 1.0 then
-				local jump = math.sin(t * math.pi) * 1.3
-				fX = -6.5 + t * 4.5
-				fY = 2.3 + jump
+		if isToxic then
+			if elapsed >= 4.8 then
+				local victoryWave = math.sin((elapsed - 4.8) * 8)
+				fY = 2.3 + math.max(0, victoryWave) * 0.45
+				fX = -6.5
+			elseif elapsed >= 3.6 then
+				local t = math.clamp((elapsed - 3.6) / 0.9, 0, 1)
+				if t < 0.5 then
+					fX = -6.5 - math.sin(t / 0.5 * math.pi) * 0.6
+					fY = 2.3
+				elseif t < 0.9 then
+					local st = (t - 0.5) / 0.4
+					fX = -6.5 + st * 4.6
+					fY = 2.3 + math.sin(st * math.pi) * 1.5
+				else
+					fX = -1.9
+					fY = 2.3
+				end
+			elseif elapsed >= 1.8 then
+				local t = elapsed - 1.8
+				if t < 0.4 then
+					fX = -6.5 - math.sin(t / 0.4 * math.pi) * 0.4
+					fY = 2.3
+				elseif t < 0.9 then
+					local st = (t - 0.4) / 0.5
+					fX = -6.5 + st * 4.5
+					fY = 2.3 + math.sin(st * math.pi) * 0.6
+				elseif t < 1.2 then
+					fX = -2.0
+					fY = 2.3
+				else
+					local rt = (t - 1.2) / 0.3
+					fX = -2.0 - rt * 4.5
+					fY = 2.3 + math.sin(rt * math.pi) * 0.3
+				end
 			else
-				fX = -2.0
-				fY = 2.3
+				local t = elapsed
+				if t < 0.4 then
+					fX = -6.5 - math.sin(t / 0.4 * math.pi) * 0.4
+					fY = 2.3
+				elseif t < 0.9 then
+					local st = (t - 0.4) / 0.5
+					fX = -6.5 + st * 4.5
+					fY = 2.3 + math.sin(st * math.pi) * 0.6
+				elseif t < 1.2 then
+					fX = -2.0
+					fY = 2.3
+				else
+					local rt = (t - 1.2) / 0.3
+					fX = -2.0 - rt * 4.5
+					fY = 2.3 + math.sin(rt * math.pi) * 0.3
+				end
 			end
 		else
-			local cycleTime = elapsed % 1.2
-			if cycleTime < 0.4 then
-				local w = math.sin((cycleTime / 0.4) * math.pi)
-				fX = -6.5 - w * 0.4
-				fY = 2.3
-			elseif cycleTime < 0.75 then
-				local lt = (cycleTime - 0.4) / 0.35
-				local jump = math.sin(lt * math.pi) * 0.55
-				fX = -6.5 + lt * 4.5
-				fY = 2.3 + jump
-			elseif cycleTime < 0.95 then
-				fX = -2.0
-				fY = 2.3
+			if elapsed >= 4.8 then
+				local victoryWave = math.sin((elapsed - 4.8) * 8)
+				fY = 2.3 + math.max(0, victoryWave) * 0.35
+				fX = -6.5
 			else
-				local rt = (cycleTime - 0.95) / 0.25
-				fX = -2.0 - rt * 4.5
-				fY = 2.3 + math.sin(rt * math.pi) * 0.3
+				local cycleTime = elapsed % 1.2
+				if cycleTime < 0.4 then
+					local w = math.sin((cycleTime / 0.4) * math.pi)
+					fX = -6.5 - w * 0.35
+					fY = 2.3
+				elseif cycleTime < 0.75 then
+					local lt = (cycleTime - 0.4) / 0.35
+					local jump = math.sin(lt * math.pi) * 0.5
+					fX = -6.5 + lt * 4.5
+					fY = 2.3 + jump
+				elseif cycleTime < 0.95 then
+					fX = -2.0
+					fY = 2.3
+				else
+					local rt = (cycleTime - 0.95) / 0.25
+					fX = -2.0 - rt * 4.5
+					fY = 2.3 + math.sin(rt * math.pi) * 0.25
+				end
 			end
 		end
 
