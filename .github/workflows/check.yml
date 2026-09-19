@@ -1,0 +1,15 @@
+name: Check
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned tools
+        shell: powershell
+        run: ./scripts/bootstrap.ps1
+      - name: Format, tests and Rojo build
+        shell: powershell
+        run: ./scripts/check.ps1
