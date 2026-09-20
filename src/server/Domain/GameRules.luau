@@ -103,6 +103,12 @@ function GameRules:CreateBlob(profile: any, _battle: any): (boolean, string)
 		Type = "Blob",
 		Tier = definition.Tier,
 		Level = 1,
+		Role = "Striker",
+		Genes = {
+			{ Element = "Biomass", Value = 25 },
+			{ Element = "Plasma", Value = 20 },
+			{ Element = "Cryo", Value = 10 },
+		},
 	})
 
 	return true, "OK"
@@ -122,10 +128,24 @@ function GameRules:Merge(profile: any, battle: any, firstId: any, secondId: any)
 		return false, "MUTANT_BUSY"
 	end
 	local targetType = nil
+	local starterGenes = nil
 	if first.Type == "Blob" and second.Type == "Blob" then
 		targetType = "ToxicBlob"
+		starterGenes = {
+			{ Element = "Toxin", Value = 50 },
+			{ Element = "Biomass", Value = 35 },
+			{ Element = "Cryo", Value = 25 },
+			{ Element = "Shadow", Value = 15 },
+		}
 	elseif first.Type == "ToxicBlob" and second.Type == "ToxicBlob" then
 		targetType = "PlasmaBlob"
+		starterGenes = {
+			{ Element = "Plasma", Value = 85 },
+			{ Element = "Electro", Value = 65 },
+			{ Element = "Shadow", Value = 45 },
+			{ Element = "Cryo", Value = 30 },
+			{ Element = "Biomass", Value = 20 },
+		}
 	else
 		return false, "INVALID_MERGE"
 	end
@@ -145,6 +165,8 @@ function GameRules:Merge(profile: any, battle: any, firstId: any, secondId: any)
 		Type = targetType,
 		Tier = definition.Tier,
 		Level = 1,
+		Role = "Striker",
+		Genes = starterGenes,
 	})
 	profile.Tutorial.FirstMergeCompleted = true
 

@@ -1,12 +1,23 @@
-# Network contract v1
+# Network contract (v1 & v2)
 ReplicatedStorage.MutantLab.Shared contains shared modules. Server creates ReplicatedStorage.MutantLab.Remotes before clients initialize.
 RemoteFunctions: GetState() and RequestAction(action, payload).
 RemoteEvent: StateChanged(snapshot, notice?), server → owning client only.
-Allowed actions: CreateBlob (no payload), Merge ({FirstId, SecondId}), StartBattle ({MutantId}), ReleaseMutant ({MutantId}). Release frees a slot without refund, requires tutorial complete, cannot remove last mutant or battling mutant. UI must confirm release.
-Every response: {Ok: boolean, Code: string, State: Snapshot?}. Codes: OK, NOT_READY, RATE_LIMITED, INVALID_REQUEST, INSUFFICIENT_FUNDS, INVENTORY_FULL, INVALID_MERGE, MUTANT_NOT_FOUND, MUTANT_BUSY, BATTLE_RUNNING, TUTORIAL_REQUIRED, LAST_MUTANT, INTERNAL_ERROR.
-Snapshot: {BioCoins, SlotsUnlocked, Mutants = {{Id, Type, Tier, Level}}, Tutorial = {Started, FreeBlobsClaimed, FirstBlobCreated, FirstMergeCompleted, FirstBattleStarted, FirstBattleCompleted, FirstBlobPurchased, TutorialCompleted}, Battle = false | {Id, MutantId, StartedAt, EndsAt, Reward}, Revision: number, PersistenceMode: string}.
-Battle timestamps use workspace:GetServerTimeNow() seconds; no battle is false. Mutants are ordered arrays. Snapshots are copies; session token and stored lock must never be transmitted.
-StateChanged notice: {Code = "BATTLE_COMPLETE", Reward = number}. Revision increases within session. UI ignores older snapshots.
+
+## Allowed Actions:
+- **v1 Actions**:
+  - `CreateBlob` (no payload)
+  - `Merge` ({FirstId, SecondId})
+  - `StartBattle` ({MutantId})
+  - `ReleaseMutant` ({MutantId})
+- **v2 Actions (Expeditions & Genetics)**:
+  - `BreedMutants` ({FirstId, SecondId}): Risk-based breeding with gene inheritance. One mutant survives, other is consumed.
+  - `StartExpedition` ({RoomCount, ActiveIds, ReserveIds?}): Starts an expedition session (3 or 5 rooms).
+  - `SelectCombatAction` ({AbilityType, TargetId?}): Submits combat turn intent (Basic, RoleSkill, Ultimate).
+  - `SecureLoot` (no payload): Secures all pending room loot into the intermediate terminal capsule.
+  - `Evacuate` (no payload): Concludes expedition at a terminal or after boss, claims all secured loot, initiates 2-minute rest cooldown.
+
+Every response: {Ok: boolean, Code: string, State: Snapshot?}. Codes: OK, NOT_READY, RATE_LIMITED, INVALID_REQUEST, INSUFFICIENT_FUNDS, INVENTORY_FULL, INVALID_MERGE, MUTANT_NOT_FOUND, MUTANT_BUSY, BATTLE_RUNNING, TUTORIAL_REQUIRED, LAST_MUTANT, NOT_IN_COMBAT, NOT_AT_TERMINAL, CANNOT_EVACUATE, INTERNAL_ERROR.
+Snapshot: {BioCoins, SlotsUnlocked, Mutants = {{Id, Type, Tier, Level, Role?, Genes?, RestUntil?}}, Tutorial, Battle = false | PublicBattle, Expedition = false | ExpeditionSnapshot, Revision: number, PersistenceMode: string}.
 No caller-supplied user ID, amount, price, type or reward. Server validates types and lengths. Shared rate limit applies to both functions.
-First two successful creates are free (persisted count), never replenish on reconnect. First battle requires tutorial merge; the first battle accepts ToxicBlob or PlasmaBlob, and either completes the tutorial on reward. Blob battles require completed tutorial. No merge/release involving battling mutant. One active battle per player; no client completion remote.
+
 

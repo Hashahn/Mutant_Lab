@@ -10,6 +10,9 @@ local GameState = require(script.Parent.Domain.GameState)
 local GameRules = require(script.Parent.Domain.GameRules)
 local RateLimiter = require(script.Parent.Domain.RateLimiter)
 local RequestValidator = require(script.Parent.Domain.RequestValidator)
+local ExpeditionSession = require(script.Parent.Domain.ExpeditionSession)
+local BreedingService = require(shared.Domain.BreedingService)
+local RestCooldownService = require(shared.Domain.RestCooldownService)
 local PlayerDataService = require(script.Parent.Services.PlayerDataService)
 local Analytics = require(script.Parent.Services.AnalyticsService)
 
@@ -35,24 +38,101 @@ local getState = remote("RemoteFunction", "GetState")
 local requestAction = remote("RemoteFunction", "RequestAction")
 local stateChanged = remote("RemoteEvent", "StateChanged")
 
--- Only the floor is shared; each client presents its own lab.
+-- Shared server foundation floor; detailed room presentation is built per-client.
 local floor = Instance.new("Part")
 floor.Name = "LabFloor"
 floor.Anchored = true
-floor.Size = Vector3.new(100, 1, 100)
+floor.Size = Vector3.new(160, 1, 160)
 floor.Position = Vector3.new(0, -0.5, 0)
 floor.Color = Color3.fromRGB(22, 29, 40)
 floor.Material = Enum.Material.SmoothPlastic
 floor.Parent = workspace
-local spawn = Instance.new("SpawnLocation")
-spawn.Name = "LabSpawn"
-spawn.Size = Vector3.new(6, 1, 6)
-spawn.Position = Vector3.new(0, 1, 20)
-spawn.Anchored = true
-spawn.Neutral = true
-spawn.Duration = 0
-spawn.Transparency = 1
-spawn.Parent = workspace
+
+local function findMutant(profile: any, mutantId: any): (number?, any?)
+	if type(mutantId) ~= "string" then
+		return nil, nil
+	end
+	for index, mutant in ipairs(profile.Mutants) do
+		if mutant.Id == mutantId then
+			return index, mutant
+		end
+	end
+	return nil, nil
+end
+
+local function applySquadRest(profile: any, squad: any)
+	local now = os.time()
+	local ids = {}
+	if squad.Active then
+		for _, u in ipairs(squad.Active) do
+			local cleanId = if u.Id:sub(1, 2) == "p_" then u.Id:sub(3) else u.Id
+			ids[cleanId] = true
+		end
+	end
+	if squad.Reserve then
+		for _, u in ipairs(squad.Reserve) do
+			local cleanId = if u.Id:sub(1, 2) == "p_" then u.Id:sub(3) else u.Id
+			ids[cleanId] = true
+		end
+	end
+	for index, m in ipairs(profile.Mutants) do
+		if ids[m.Id] then
+			profile.Mutants[index] = RestCooldownService.StartRest(m, now)
+		end
+	end
+end
+
+local function mergeSecuredLoot(profile: any, loot: any)
+	if not loot then
+		return
+	end
+	if type(profile.SecuredLoot) ~= "table" then
+		profile.SecuredLoot = { BioCoins = 0, DnaFragments = 0, Items = {} }
+	end
+	profile.BioCoins = math.min(GameConfig.MaxBioCoins, profile.BioCoins + (loot.BioCoins or 0))
+	profile.SecuredLoot.BioCoins += (loot.BioCoins or 0)
+	profile.SecuredLoot.DnaFragments += (loot.DnaFragments or 0)
+	if type(loot.Items) == "table" then
+		for _, item in ipairs(loot.Items) do
+			table.insert(profile.SecuredLoot.Items, item)
+		end
+	end
+end
+
+-- SecuredLoot in the expedition is a cumulative UI ledger. Only its uncredited
+-- delta enters the persistent profile; all these mutations are synchronous.
+local function creditExpeditionLoot(profile, expedition)
+	mergeSecuredLoot(profile, expedition:TakeUncreditedLoot())
+end
+
+local function finalizeExpedition(profile, expedition)
+	if expedition.Finalized or (expedition.Status ~= "Completed" and expedition.Status ~= "Failed") then
+		return
+	end
+	creditExpeditionLoot(profile, expedition)
+	if expedition.Status == "Completed" then
+		applySquadRest(profile, expedition.PlayerSquad)
+	end
+	expedition.Finalized = true
+end
+
+local function participantBusy(session, mutantId)
+	if session.Battle and session.Battle.MutantId == mutantId then
+		return true
+	end
+	local expedition = session.Expedition
+	if not expedition or expedition.Finalized or expedition.Status == "Failed" then
+		return false
+	end
+	for _, group in { expedition.PlayerSquad.Active, expedition.PlayerSquad.Reserve } do
+		for _, unit in group do
+			if unit.Id == "p_" .. mutantId then
+				return true
+			end
+		end
+	end
+	return false
+end
 
 local function snapshot(player)
 	local profile = data:Get(player)
@@ -60,7 +140,12 @@ local function snapshot(player)
 	if not profile or not session then
 		return nil
 	end
-	return GameState.snapshot(profile, session.Battle, session.Revision, data.Mode)
+	local snap = GameState.snapshot(profile, session.Battle, session.Revision, data.Mode)
+	if session.Expedition then
+		snap.Expedition = session.Expedition:GetSnapshot()
+		snap.Expedition.CurrentCombat = session.Expedition.CurrentCombat
+	end
+	return snap
 end
 local function response(player, ok, code)
 	return { Ok = ok, Code = code, State = snapshot(player) }
@@ -119,6 +204,27 @@ requestAction.OnServerInvoke = function(player, action, payload)
 	if closing or not session or not profile then
 		return { Ok = false, Code = "NOT_READY" }
 	end
+	-- Legacy and expedition actions share the same ownership/rest locks.
+	local affectedIds = {}
+	if action == "Merge" or action == "BreedMutants" then
+		affectedIds = { payload.FirstId, payload.SecondId }
+	elseif action == "ReleaseMutant" or action == "StartBattle" then
+		affectedIds = { payload.MutantId }
+	end
+	for _, id in affectedIds do
+		-- Preserve the legacy duplicate-training error.
+		if participantBusy(session, id) then
+			return response(
+				player,
+				false,
+				if action == "StartBattle" and session.Battle then "BATTLE_RUNNING" else "MUTANT_BUSY"
+			)
+		end
+		local _, mutant = findMutant(profile, id)
+		if mutant and RestCooldownService.IsOnRest(mutant, os.time()) then
+			return response(player, false, "MUTANT_RESTING")
+		end
+	end
 	local before = table.clone(profile.Tutorial)
 	local balance = profile.BioCoins
 	local ok, code, detail
@@ -132,7 +238,172 @@ requestAction.OnServerInvoke = function(player, action, payload)
 	elseif action == "StartBattle" then
 		ok, code, detail =
 			rules:StartBattle(profile, session.Battle, payload.MutantId, workspace:GetServerTimeNow())
+	elseif action == "StartExpedition" then
+		if session.Battle then
+			return response(player, false, "BATTLE_RUNNING")
+		end
+		if
+			session.Expedition
+			and session.Expedition.Status ~= "Completed"
+			and session.Expedition.Status ~= "Failed"
+		then
+			ok = false
+			code = "EXPEDITION_ACTIVE"
+		else
+			local mutantsById = {}
+			for _, m in ipairs(profile.Mutants) do
+				mutantsById[m.Id] = m
+			end
+
+			local activeUnits = {}
+			local reserveUnits = {}
+			local valid = true
+			local now = os.time()
+
+			for _, id in ipairs(payload.ActiveIds) do
+				local m = mutantsById[id]
+				if not m or (m.RestUntil and m.RestUntil > now) then
+					valid = false
+					break
+				end
+				table.insert(activeUnits, {
+					Id = "p_" .. m.Id,
+					Name = m.Type,
+					Tier = m.Tier,
+					Role = m.Role or "Striker",
+					Genes = m.Genes or {},
+				})
+			end
+
+			if valid and payload.ReserveIds then
+				for _, id in ipairs(payload.ReserveIds) do
+					local m = mutantsById[id]
+					if not m or (m.RestUntil and m.RestUntil > now) then
+						valid = false
+						break
+					end
+					table.insert(reserveUnits, {
+						Id = "p_" .. m.Id,
+						Name = m.Type,
+						Tier = m.Tier,
+						Role = m.Role or "Striker",
+						Genes = m.Genes or {},
+					})
+				end
+			end
+
+			if not valid or #activeUnits == 0 then
+				ok = false
+				code = "INVALID_SQUAD"
+			else
+				local expId = HttpService:GenerateGUID(false)
+				session.Expedition = ExpeditionSession.new(expId, {
+					Active = activeUnits,
+					Reserve = reserveUnits,
+				}, payload.RoomCount)
+				finalizeExpedition(profile, session.Expedition)
+				ok = true
+				code = "OK"
+			end
+		end
+	elseif action == "SelectCombatAction" then
+		if not session.Expedition or session.Expedition.Status ~= "InCombat" then
+			ok = false
+			code = "NO_ACTIVE_COMBAT"
+		else
+			local stepOk, stepErr = session.Expedition:StepCombatAction(payload)
+			ok = stepOk
+			code = if stepOk then "OK" else (stepErr or "COMBAT_ACTION_FAILED")
+
+			finalizeExpedition(profile, session.Expedition)
+		end
+	elseif action == "SecureLoot" then
+		if not session.Expedition or session.Expedition.Status ~= "AtTerminal" then
+			ok = false
+			code = "NOT_AT_TERMINAL"
+		else
+			local secOk, secErr = session.Expedition:SecureLoot()
+			ok = secOk
+			code = if secOk then "OK" else (secErr or "FAILED_TO_SECURE")
+			if secOk then
+				creditExpeditionLoot(profile, session.Expedition)
+			end
+		end
+	elseif action == "ProceedNextRoom" then
+		if not session.Expedition or session.Expedition.Status ~= "AtTerminal" then
+			ok = false
+			code = "CANNOT_PROCEED"
+		else
+			local nextOk, nextErr = session.Expedition:ProceedToNextRoom()
+			ok = nextOk
+			code = if nextOk then "OK" else (nextErr or "FAILED_TO_PROCEED")
+
+			finalizeExpedition(profile, session.Expedition)
+		end
+	elseif action == "Evacuate" then
+		if
+			not session.Expedition
+			or session.Expedition.Finalized
+			or session.Expedition.Status ~= "AtTerminal"
+		then
+			ok = false
+			code = "CANNOT_EVACUATE"
+		else
+			local evacOk, _, evacErr = session.Expedition:Evacuate()
+			if evacOk then
+				finalizeExpedition(profile, session.Expedition)
+				ok = true
+				code = "OK"
+			else
+				ok = false
+				code = evacErr or "CANNOT_EVACUATE"
+			end
+		end
+	elseif action == "BreedMutants" then
+		local pId = payload.FirstId or payload.PrimaryId
+		local sId = payload.SecondId or payload.SecondaryId
+		local primaryIndex, primary = findMutant(profile, pId)
+		local secondaryIndex, secondary = findMutant(profile, sId)
+		local now = os.time()
+		if not primary or not secondary or primaryIndex == secondaryIndex then
+			ok = false
+			code = "INVALID_BREED_TARGETS"
+		elseif
+			(primary.RestUntil and primary.RestUntil > now)
+			or (secondary.RestUntil and secondary.RestUntil > now)
+		then
+			ok = false
+			code = "MUTANT_RESTING"
+		else
+			local breedOk, breedRes, breedErr = BreedingService.Breed(primary, secondary)
+			if breedOk and breedRes then
+				local consumedId = breedRes.ConsumedId
+				local removeIndex = findMutant(profile, consumedId)
+				if removeIndex then
+					local consumed = profile.Mutants[removeIndex]
+					profile.BreedingConsumedUnits = (profile.BreedingConsumedUnits or 0)
+						+ 2 ^ (consumed.Tier - 1)
+					table.remove(profile.Mutants, removeIndex)
+				end
+				local survivorId = breedRes.Survivor.Id
+				local _, survivor = findMutant(profile, survivorId)
+				if survivor then
+					survivor.Genes = breedRes.Survivor.Genes
+				end
+				ok = true
+				code = "OK"
+			else
+				ok = false
+				code = breedErr or "BREEDING_FAILED"
+			end
+		end
 	end
+
+	if ok == nil then
+		ok = false
+		code = "INVALID_REQUEST"
+	end
+
 	if ok then
 		if action == "StartBattle" then
 			session.Battle = detail
@@ -171,9 +442,22 @@ local function added(player)
 	end
 	sessions[player] = { Battle = false, Revision = 1 }
 	Analytics.Joined(player)
-	if not profile.Tutorial.Started then
-		profile.Tutorial.Started = true
-		Analytics.OnboardingStarted(player)
+	local function onCharacter(character)
+		task.spawn(function()
+			if character.WaitForChild then
+				local hrp = character:WaitForChild("HumanoidRootPart", 5)
+				if hrp and hrp.IsA and hrp:IsA("BasePart") then
+					hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+					hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+				end
+			end
+		end)
+	end
+	if player.Character then
+		onCharacter(player.Character)
+	end
+	if player.CharacterAdded then
+		player.CharacterAdded:Connect(onCharacter)
 	end
 	publish(player)
 end

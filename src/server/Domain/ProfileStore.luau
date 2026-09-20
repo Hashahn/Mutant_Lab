@@ -72,7 +72,8 @@ function ProfileStore.acquire(
 	now: number,
 	leaseSeconds: number,
 	newProfile: any,
-	validateProfile: (any) -> boolean
+	validateProfile: (any) -> boolean,
+	migrateProfile: ((any) -> any)?
 ): (any?, string)
 	local profile
 	if current == nil then
@@ -81,14 +82,21 @@ function ProfileStore.acquire(
 		end
 		profile = deepCopy(newProfile)
 	else
-		if not validEnvelope(current, validateProfile) then
+		local envelope = current
+		if migrateProfile ~= nil and type(envelope) == "table" and type(envelope.Profile) == "table" then
+			envelope = {
+				Profile = migrateProfile(envelope.Profile),
+				Session = envelope.Session,
+			}
+		end
+		if not validEnvelope(envelope, validateProfile) then
 			return nil, "INVALID_DATA"
 		end
-		local lock = current.Session
+		local lock = envelope.Session
 		if lock ~= nil and lock.Token ~= token and lock.LeaseUntil > now then
 			return nil, "SESSION_LOCKED"
 		end
-		profile = deepCopy(current.Profile)
+		profile = deepCopy(envelope.Profile)
 	end
 
 	return {
@@ -108,16 +116,24 @@ function ProfileStore.save(
 	now: number,
 	leaseSeconds: number,
 	release: boolean,
-	validateProfile: (any) -> boolean
+	validateProfile: (any) -> boolean,
+	migrateProfile: ((any) -> any)?
 ): (any?, string)
-	if not validEnvelope(current, validateProfile) then
+	local envelope = current
+	if migrateProfile ~= nil and type(envelope) == "table" and type(envelope.Profile) == "table" then
+		envelope = {
+			Profile = migrateProfile(envelope.Profile),
+			Session = envelope.Session,
+		}
+	end
+	if not validEnvelope(envelope, validateProfile) then
 		return nil, "SESSION_LOST"
 	end
 	if not validateProfile(profile) then
 		return nil, "INVALID_PROFILE"
 	end
 
-	local lock = current.Session
+	local lock = envelope.Session
 	if lock == nil or lock.Token ~= token or lock.LeaseUntil <= now then
 		return nil, "SESSION_LOST"
 	end

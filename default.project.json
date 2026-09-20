@@ -32,13 +32,24 @@
         "FilteringEnabled": true,
         "Gravity": 196.2
       },
+      "Baseplate": {
+        "$className": "Part",
+        "$properties": {
+          "Anchored": true,
+          "CanCollide": true,
+          "CFrame": [0, -2, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+          "Size": [250, 4, 250],
+          "Material": "Metal",
+          "Color": [0.08, 0.1, 0.14]
+        }
+      },
       "SpawnLocation": {
         "$className": "SpawnLocation",
         "$properties": {
           "Anchored": true,
-          "CanCollide": false,
-          "CFrame": [-3, 1, -10, 1, 0, 0, 0, 1, 0, 0, 0, 1],
-          "Size": [6, 1, 6],
+          "CanCollide": true,
+          "CFrame": [0, 0.5, -12, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+          "Size": [10, 1, 10],
           "Transparency": 1,
           "Duration": 0
         }
@@ -47,8 +58,9 @@
     "Lighting": {
       "$className": "Lighting",
       "$properties": {
+        "Technology": "Future",
         "ClockTime": 14,
-        "Brightness": 2
+        "Brightness": 1.5
       }
     }
   }

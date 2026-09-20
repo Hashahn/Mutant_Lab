@@ -3,6 +3,16 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
+local CombatUI = require(script.Parent.CombatUI)
+local SquadUI = require(script.Parent.SquadUI)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local isRoblox = typeof(script) == "Instance" and typeof(game) == "Instance"
+local rootStorage = if isRoblox then ReplicatedStorage:WaitForChild("MutantLab") else nil
+local sharedStorage = if rootStorage then rootStorage:WaitForChild("Shared") else nil
+local MutantStats = if isRoblox
+	then require(sharedStorage:WaitForChild("Combat"):WaitForChild("MutantStats"))
+	else require("../../shared/Combat/MutantStats")
+
 local UIController = {}
 UIController.__index = UIController
 
@@ -37,12 +47,21 @@ local ERROR_TEXT = {
 	INVENTORY_FULL = "Your mutant slots are full.",
 	INVALID_MERGE = "Select two identical mutants to merge (2x Blob or 2x Toxic Blob).",
 	MUTANT_NOT_FOUND = "That mutant is no longer available.",
-	MUTANT_BUSY = "That mutant is currently battling.",
+	MUTANT_BUSY = "That mutant is assigned to an active battle or expedition.",
 	BATTLE_RUNNING = "A training battle is already running.",
 	TUTORIAL_REQUIRED = "Follow the current tutorial step first.",
 	LAST_MUTANT = "You cannot release your last mutant.",
 	INTERNAL_ERROR = "The lab hit an internal error. Please retry.",
 	CONNECTION_ERROR = "Connection lost. Please retry.",
+	INVALID_BREED_TARGETS = "Select two different specimens to breed.",
+	MUTANT_RESTING = "One of the selected specimens is currently resting.",
+	BREEDING_FAILED = "Genetic synthesis failed to stabilize.",
+	EXPEDITION_ACTIVE = "An expedition is already in progress.",
+	INVALID_SQUAD = "Select distinct, ready mutants for your squad.",
+	CANNOT_PROCEED = "Finish the current battle before continuing.",
+	CANNOT_EVACUATE = "Evacuation is only available at an active terminal.",
+	NOT_AT_TERMINAL = "Reach a terminal to secure loot.",
+	GENE_LIMIT_REACHED = "This synthesis would exceed the gene limit.",
 }
 
 local function addCorner(parent, radius)
@@ -300,8 +319,21 @@ function UIController:_build()
 	end)
 	self._merge = merge
 
+	local breedBtn = makeButton(scroll, "BREED SELECTED (DNA)", COLORS.Lime)
+	breedBtn.LayoutOrder = 9
+	breedBtn.Activated:Connect(function()
+		if not self._busy and #self._selected == 2 then
+			self:_playSound("Click")
+			self._callbacks.OnAction(
+				"BreedMutants",
+				{ FirstId = self._selected[1], SecondId = self._selected[2] }
+			)
+		end
+	end)
+	self._breedBtn = breedBtn
+
 	local battle = makeButton(scroll, "START TRAINING", COLORS.Orange)
-	battle.LayoutOrder = 9
+	battle.LayoutOrder = 10
 	battle.Activated:Connect(function()
 		if not self._busy and #self._selected == 1 then
 			self:_playSound("Click")
@@ -310,6 +342,48 @@ function UIController:_build()
 	end)
 	self._battleButton = battle
 
+	local expeditionBtn = makeButton(scroll, "EXPEDITIONS (3v3)", COLORS.Cyan)
+	expeditionBtn.LayoutOrder = 11
+	expeditionBtn.Activated:Connect(function()
+		self:_playSound("Click")
+		if self._squadUI then
+			self._squadUI:SetVisible(true)
+		end
+	end)
+	self._expeditionBtn = expeditionBtn
+
+	local squadUI = SquadUI.new(screen, {
+		OnDeploy = function(payload)
+			self:_playSound("Click")
+			self._callbacks.OnAction("StartExpedition", payload)
+		end,
+	})
+	self._squadUI = squadUI
+
+	local combatUI = CombatUI.new(screen, {
+		OnSelectAction = function(abilityType, targetId, actorId)
+			self:_playSound("Click")
+			self._callbacks.OnAction("SelectCombatAction", {
+				AbilityType = abilityType,
+				TargetId = targetId,
+				ActorId = actorId,
+			})
+		end,
+		OnSecureLoot = function()
+			self:_playSound("Click")
+			self._callbacks.OnAction("SecureLoot", nil)
+		end,
+		OnEvacuate = function()
+			self:_playSound("Click")
+			self._callbacks.OnAction("Evacuate", nil)
+		end,
+		OnNextRoom = function()
+			self:_playSound("Click")
+			self._callbacks.OnAction("ProceedNextRoom", nil)
+		end,
+	})
+	self._combatUI = combatUI
+
 	local battleStatus = makeLabel(
 		scroll,
 		"No active training battle",
@@ -317,7 +391,7 @@ function UIController:_build()
 		COLORS.Muted,
 		Enum.Font.GothamMedium
 	)
-	battleStatus.LayoutOrder = 10
+	battleStatus.LayoutOrder = 11
 	battleStatus.BackgroundColor3 = COLORS.PanelSoft
 	battleStatus.BackgroundTransparency = 0.1
 	battleStatus.TextXAlignment = Enum.TextXAlignment.Center
@@ -326,7 +400,7 @@ function UIController:_build()
 	self._battleStatus = battleStatus
 
 	local mode = makeLabel(scroll, "Persistence: --", UDim2.new(1, 0, 0, 22), COLORS.Muted, Enum.Font.Gotham)
-	mode.LayoutOrder = 11
+	mode.LayoutOrder = 12
 	mode.TextSize = 10
 	mode.TextXAlignment = Enum.TextXAlignment.Center
 	self._mode = mode
@@ -396,6 +470,8 @@ function UIController:_build()
 		end)
 	)
 
+	self:_buildConfirm()
+	self:_buildStatsModal()
 	self:_refreshControls()
 end
 
@@ -468,6 +544,341 @@ function UIController:_showRelease(mutantId)
 	self._confirmShade.Visible = true
 end
 
+function UIController:_buildStatsModal()
+	local shade = Instance.new("Frame")
+	shade.Name = "StatsModalShade"
+	shade.Size = UDim2.fromScale(1, 1)
+	shade.BackgroundColor3 = Color3.new(0, 0, 0)
+	shade.BackgroundTransparency = 0.35
+	shade.Visible = false
+	shade.ZIndex = 60
+	shade.Parent = self._screen
+	self._statsShade = shade
+
+	local box = Instance.new("Frame")
+	box.AnchorPoint = Vector2.new(0.5, 0.5)
+	box.Position = UDim2.fromScale(0.5, 0.5)
+	box.Size = UDim2.new(0, 460, 0, 500)
+	box.BackgroundColor3 = COLORS.Panel
+	box.ZIndex = 61
+	box.Parent = shade
+	addCorner(box, 14)
+	addStroke(box, COLORS.Cyan, 2, 0.15)
+
+	local title =
+		makeLabel(box, "SPECIMEN ANALYSIS", UDim2.new(1, -60, 0, 32), COLORS.Cyan, Enum.Font.GothamBlack)
+	title.Position = UDim2.fromOffset(16, 12)
+	title.TextSize = 17
+	title.ZIndex = 62
+
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Size = UDim2.fromOffset(32, 32)
+	closeBtn.Position = UDim2.new(1, -44, 0, 12)
+	closeBtn.BackgroundColor3 = COLORS.PanelSoft
+	closeBtn.Text = "×"
+	closeBtn.TextColor3 = COLORS.Text
+	closeBtn.Font = Enum.Font.GothamBold
+	closeBtn.TextSize = 22
+	closeBtn.ZIndex = 62
+	closeBtn.Parent = box
+	addCorner(closeBtn, 6)
+	closeBtn.Activated:Connect(function()
+		self:_playSound("Click")
+		shade.Visible = false
+	end)
+
+	local scroll = Instance.new("ScrollingFrame")
+	scroll.Name = "StatsScroll"
+	scroll.Size = UDim2.new(1, -32, 1, -95)
+	scroll.Position = UDim2.fromOffset(16, 48)
+	scroll.BackgroundTransparency = 1
+	scroll.ScrollBarThickness = 4
+	scroll.ScrollBarImageColor3 = COLORS.Cyan
+	scroll.ZIndex = 62
+	scroll.Parent = box
+	self._statsScroll = scroll
+
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.Padding = UDim.new(0, 8)
+	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	listLayout.Parent = scroll
+
+	local bottomClose = makeButton(box, "CLOSE ANALYSIS", COLORS.PanelSoft)
+	bottomClose.Size = UDim2.new(1, -32, 0, 36)
+	bottomClose.Position = UDim2.new(0, 16, 1, -44)
+	bottomClose.ZIndex = 62
+	bottomClose.Activated:Connect(function()
+		self:_playSound("Click")
+		shade.Visible = false
+	end)
+end
+
+function UIController:_showStats(mutant)
+	if not self._statsShade or not self._statsScroll then
+		return
+	end
+	self:_playSound("Click")
+	self._statsScroll:ClearAllChildren()
+
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.Padding = UDim.new(0, 8)
+	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	listLayout.Parent = self._statsScroll
+
+	local genes = mutant.Genes or {}
+	local role = mutant.Role or "Striker"
+	local tier = mutant.Tier or 1
+	local calculated = MutantStats.CalculateStats(tier, genes, role)
+	local effective = calculated.EffectiveElements
+
+	local displayName = if mutant.Type == "PlasmaBlob"
+		then "PLASMA BLOB"
+		elseif mutant.Type == "ToxicBlob" then "TOXIC BLOB"
+		else "BLOB"
+	local nameColor = if mutant.Type == "PlasmaBlob"
+		then COLORS.Purple
+		elseif mutant.Type == "ToxicBlob" then COLORS.Lime
+		else COLORS.Cyan
+
+	-- 1. Identity & Role Card
+	local idCard = Instance.new("Frame")
+	idCard.Size = UDim2.new(1, 0, 0, 78)
+	idCard.BackgroundColor3 = COLORS.Card
+	idCard.LayoutOrder = 1
+	idCard.ZIndex = 63
+	idCard.Parent = self._statsScroll
+	addCorner(idCard, 8)
+
+	local nameLbl = makeLabel(idCard, displayName, UDim2.new(0.6, 0, 0, 26), nameColor, Enum.Font.GothamBlack)
+	nameLbl.Position = UDim2.fromOffset(12, 8)
+	nameLbl.TextSize = 16
+	nameLbl.ZIndex = 64
+
+	local tierLbl = makeLabel(
+		idCard,
+		string.format("TIER %d • LEVEL %d", tier, mutant.Level or 1),
+		UDim2.new(0.6, 0, 0, 18),
+		COLORS.Muted,
+		Enum.Font.GothamBold
+	)
+	tierLbl.Position = UDim2.fromOffset(12, 34)
+	tierLbl.TextSize = 11
+	tierLbl.ZIndex = 64
+
+	local roleBadge = makeLabel(
+		idCard,
+		"ROLE: " .. string.upper(role),
+		UDim2.new(0.35, 0, 0, 24),
+		COLORS.Lime,
+		Enum.Font.GothamBold
+	)
+	roleBadge.Position = UDim2.new(0.62, 0, 0, 8)
+	roleBadge.BackgroundColor3 = COLORS.PanelSoft
+	roleBadge.BackgroundTransparency = 0.2
+	roleBadge.TextSize = 11
+	roleBadge.ZIndex = 64
+	addCorner(roleBadge, 4)
+
+	local roleDescText = if role == "Guardian"
+		then "Frontline tank (+25% Max HP, taunt ability)."
+		elseif role == "Healer" then "Restoration support (team HP recovery)."
+		elseif role == "Buffer" then "Tactical booster (attack & energy surging)."
+		elseif role == "Controller" then "Battlefield disruptor (slows & disables)."
+		else "High single-target burst damage dealer."
+	local roleDesc = makeLabel(idCard, roleDescText, UDim2.new(1, -24, 0, 18), COLORS.Text, Enum.Font.Gotham)
+	roleDesc.Position = UDim2.fromOffset(12, 54)
+	roleDesc.TextSize = 10
+	roleDesc.ZIndex = 64
+
+	-- 2. Combat Attributes (4-grid)
+	local statsCard = Instance.new("Frame")
+	statsCard.Size = UDim2.new(1, 0, 0, 68)
+	statsCard.BackgroundColor3 = COLORS.Card
+	statsCard.LayoutOrder = 2
+	statsCard.ZIndex = 63
+	statsCard.Parent = self._statsScroll
+	addCorner(statsCard, 8)
+
+	local statItems = {
+		{ Label = "HEALTH", Value = tostring(calculated.MaxHp), Icon = "❤️", Color = COLORS.Red },
+		{ Label = "ATTACK", Value = tostring(calculated.Attack), Icon = "⚔️", Color = COLORS.Orange },
+		{ Label = "DEFENSE", Value = "0", Icon = "🛡️", Color = COLORS.Cyan },
+		{ Label = "SPEED", Value = tostring(calculated.Speed), Icon = "⚡", Color = COLORS.Lime },
+	}
+
+	for i, item in ipairs(statItems) do
+		local cell = Instance.new("Frame")
+		cell.Size = UDim2.new(0.25, -6, 1, -12)
+		cell.Position = UDim2.new((i - 1) * 0.25, 3, 0, 6)
+		cell.BackgroundColor3 = COLORS.PanelSoft
+		cell.ZIndex = 64
+		cell.Parent = statsCard
+		addCorner(cell, 6)
+
+		local valLbl = makeLabel(
+			cell,
+			item.Icon .. " " .. item.Value,
+			UDim2.new(1, 0, 0, 24),
+			item.Color,
+			Enum.Font.GothamBlack
+		)
+		valLbl.Position = UDim2.fromOffset(0, 6)
+		valLbl.TextSize = 12
+		valLbl.TextXAlignment = Enum.TextXAlignment.Center
+		valLbl.ZIndex = 65
+
+		local subLbl = makeLabel(cell, item.Label, UDim2.new(1, 0, 0, 16), COLORS.Muted, Enum.Font.GothamBold)
+		subLbl.Position = UDim2.fromOffset(0, 30)
+		subLbl.TextSize = 9
+		subLbl.TextXAlignment = Enum.TextXAlignment.Center
+		subLbl.ZIndex = 65
+	end
+
+	-- 3. Genetic Structure & Elements
+	local maxSlots = if tier == 1 then 3 else (if tier == 2 then 4 else 5)
+	local geneCardHeight = 56 + math.max(1, #genes) * 22
+	local geneCard = Instance.new("Frame")
+	geneCard.Size = UDim2.new(1, 0, 0, geneCardHeight)
+	geneCard.BackgroundColor3 = COLORS.Card
+	geneCard.LayoutOrder = 3
+	geneCard.ZIndex = 63
+	geneCard.Parent = self._statsScroll
+	addCorner(geneCard, 8)
+
+	local geneTitle = makeLabel(
+		geneCard,
+		string.format("🧬 GENETICS (%d/%d SLOTS)", #genes, maxSlots),
+		UDim2.new(1, -24, 0, 22),
+		COLORS.Cyan,
+		Enum.Font.GothamBold
+	)
+	geneTitle.Position = UDim2.fromOffset(12, 6)
+	geneTitle.TextSize = 11
+	geneTitle.ZIndex = 64
+
+	local elemTag = makeLabel(
+		geneCard,
+		string.format(
+			"PRIMARY: %s • SECONDARY: %s",
+			effective.Primary or "Biomass",
+			effective.Secondary or "None"
+		),
+		UDim2.new(1, -24, 0, 18),
+		COLORS.Lime,
+		Enum.Font.GothamBold
+	)
+	elemTag.Position = UDim2.fromOffset(12, 28)
+	elemTag.TextSize = 10
+	elemTag.ZIndex = 64
+
+	if #genes == 0 then
+		local noGenes = makeLabel(
+			geneCard,
+			"No mutant genes inherited yet. Synthesize in Breeding Station.",
+			UDim2.new(1, -24, 0, 20),
+			COLORS.Muted,
+			Enum.Font.Gotham
+		)
+		noGenes.Position = UDim2.fromOffset(12, 50)
+		noGenes.TextSize = 10
+		noGenes.ZIndex = 64
+	else
+		for gIdx, g in ipairs(genes) do
+			local gLbl = makeLabel(
+				geneCard,
+				string.format("• %s Gene: +%d points", g.Element, g.Value),
+				UDim2.new(1, -24, 0, 18),
+				COLORS.Text,
+				Enum.Font.GothamMedium
+			)
+			gLbl.Position = UDim2.fromOffset(16, 48 + (gIdx - 1) * 22)
+			gLbl.TextSize = 11
+			gLbl.ZIndex = 64
+		end
+	end
+
+	-- 4. Combat Abilities
+	local abilities = MutantStats.BuildAbilities(tier, role, calculated)
+	local abilityCard = Instance.new("Frame")
+	abilityCard.Size = UDim2.new(1, 0, 0, 36 + #abilities * 44)
+	abilityCard.BackgroundColor3 = COLORS.Card
+	abilityCard.LayoutOrder = 4
+	abilityCard.ZIndex = 63
+	abilityCard.Parent = self._statsScroll
+	addCorner(abilityCard, 8)
+
+	local abTitle = makeLabel(
+		abilityCard,
+		"⚔️ COMBAT SKILLS",
+		UDim2.new(1, -24, 0, 22),
+		COLORS.Cyan,
+		Enum.Font.GothamBold
+	)
+	abTitle.Position = UDim2.fromOffset(12, 6)
+	abTitle.TextSize = 11
+	abTitle.ZIndex = 64
+
+	for abIdx, ab in ipairs(abilities) do
+		local costText = if ab.EnergyCost == 0
+			then "0 ⚡ (+1 Gain)"
+			else string.format("%d ⚡", ab.EnergyCost)
+		local cdText = if ab.Cooldown > 0 then string.format(" [CD: %d turns]", ab.Cooldown) else ""
+		local abRow = makeLabel(
+			abilityCard,
+			string.format("[%s] %s  •  Cost: %s%s", ab.Type, ab.Name, costText, cdText),
+			UDim2.new(1, -24, 0, 20),
+			COLORS.Orange,
+			Enum.Font.GothamBold
+		)
+		abRow.Position = UDim2.fromOffset(12, 30 + (abIdx - 1) * 44)
+		abRow.TextSize = 11
+		abRow.ZIndex = 64
+
+		local abDesc = makeLabel(
+			abilityCard,
+			ab.Description or "Deals element-aligned damage to target.",
+			UDim2.new(1, -24, 0, 18),
+			COLORS.Muted,
+			Enum.Font.Gotham
+		)
+		abDesc.Position = UDim2.fromOffset(12, 48 + (abIdx - 1) * 44)
+		abDesc.TextSize = 10
+		abDesc.ZIndex = 64
+	end
+
+	-- 5. Rest Status
+	local now = os.time()
+	local isResting = mutant.RestUntil and mutant.RestUntil > now
+	local statusCard = Instance.new("Frame")
+	statusCard.Size = UDim2.new(1, 0, 0, 50)
+	statusCard.BackgroundColor3 = if isResting then Color3.fromRGB(45, 30, 20) else Color3.fromRGB(20, 40, 30)
+	statusCard.LayoutOrder = 5
+	statusCard.ZIndex = 63
+	statusCard.Parent = self._statsScroll
+	addCorner(statusCard, 8)
+
+	local statusText = if isResting
+		then string.format(
+			"⏳ RESTING: %d seconds remaining. 40%% mutation bonus upon rest completion.",
+			mutant.RestUntil - now
+		)
+		else "✅ READY FOR ACTION: Available for expeditions and genetic synthesis."
+	local statusLbl = makeLabel(
+		statusCard,
+		statusText,
+		UDim2.new(1, -24, 1, 0),
+		if isResting then COLORS.Orange else COLORS.Lime,
+		Enum.Font.GothamBold
+	)
+	statusLbl.Position = UDim2.fromOffset(12, 0)
+	statusLbl.TextWrapped = true
+	statusLbl.TextSize = 11
+	statusLbl.ZIndex = 64
+
+	self._statsScroll.CanvasSize = UDim2.new(0, 0, 0, 310 + geneCardHeight + #abilities * 44)
+	self._statsShade.Visible = true
+end
+
 function UIController:_isSelected(mutantId)
 	return table.find(self._selected, mutantId) ~= nil
 end
@@ -519,7 +930,7 @@ function UIController:_renderInventory()
 		local card = Instance.new("Frame")
 		card.Name = tostring(mutant.Id)
 		card.LayoutOrder = order
-		card.Size = UDim2.new(1, 0, 0, 72)
+		card.Size = UDim2.new(1, 0, 0, 88)
 		card.BackgroundColor3 = if selected then Color3.fromRGB(40, 78, 75) else COLORS.Card
 		card.Parent = self._inventory
 		addCorner(card, 10)
@@ -532,7 +943,7 @@ function UIController:_renderInventory()
 
 		local selectButton = Instance.new("TextButton")
 		selectButton.BackgroundTransparency = 1
-		selectButton.Size = UDim2.new(1, -58, 1, 0)
+		selectButton.Size = UDim2.new(1, -94, 1, 0)
 		selectButton.Text = ""
 		selectButton.Parent = card
 		local displayName = if mutant.Type == "PlasmaBlob"
@@ -544,43 +955,90 @@ function UIController:_renderInventory()
 			elseif mutant.Type == "ToxicBlob" then COLORS.Lime
 			else COLORS.Cyan
 		local name =
-			makeLabel(selectButton, displayName, UDim2.new(0.5, 0, 0, 28), nameColor, Enum.Font.GothamBold)
-		name.Position = UDim2.fromOffset(12, 8)
+			makeLabel(selectButton, displayName, UDim2.new(0.5, 0, 0, 26), nameColor, Enum.Font.GothamBold)
+		name.Position = UDim2.fromOffset(12, 6)
 		name.TextSize = 15
 
 		local badgeText = if selected then "SELECTED  ✓" else "TAP TO SELECT"
 		local badgeColor = if selected then COLORS.Lime else COLORS.Muted
 		local badge =
 			makeLabel(selectButton, badgeText, UDim2.new(0.48, 0, 0, 18), badgeColor, Enum.Font.GothamBold)
-		badge.Position = UDim2.new(0.52, -6, 0, 12)
+		badge.Position = UDim2.new(0.52, -6, 0, 10)
 		badge.TextXAlignment = Enum.TextXAlignment.Right
 		badge.TextSize = 10
 
+		local roleText = mutant.Role or "Striker"
+		local now = os.time()
+		local isResting = mutant.RestUntil and mutant.RestUntil > now
+		local restSuffix = if isResting
+			then string.format(" • ⏳ REST (%ds)", math.max(1, mutant.RestUntil - now))
+			else ""
 		local detail = makeLabel(
 			selectButton,
-			string.format("Tier %s  •  Level %s", tostring(mutant.Tier), tostring(mutant.Level)),
-			UDim2.new(1, -16, 0, 22),
-			COLORS.Muted,
+			string.format(
+				"Tier %s • Lv.%s • %s%s",
+				tostring(mutant.Tier),
+				tostring(mutant.Level),
+				roleText,
+				restSuffix
+			),
+			UDim2.new(1, -16, 0, 20),
+			if isResting then COLORS.Orange else COLORS.Muted,
 			Enum.Font.Gotham
 		)
-		detail.Position = UDim2.fromOffset(12, 37)
+		detail.Position = UDim2.fromOffset(12, 30)
 		detail.TextSize = 11
 		detail.TextTruncate = Enum.TextTruncate.AtEnd
+
+		local calculated = MutantStats.CalculateStats(mutant.Tier, mutant.Genes or {}, mutant.Role)
+		local geneCount = if mutant.Genes then #mutant.Genes else 0
+		local statsSummary = makeLabel(
+			selectButton,
+			string.format(
+				"❤️ %d  ⚔️ %d  ⚡ %d  •  🧬 %d gene(s)",
+				calculated.MaxHp,
+				calculated.Attack,
+				calculated.Speed,
+				geneCount
+			),
+			UDim2.new(1, -16, 0, 18),
+			COLORS.Cyan,
+			Enum.Font.GothamBold
+		)
+		statsSummary.Position = UDim2.fromOffset(12, 54)
+		statsSummary.TextSize = 11
+
 		selectButton.Activated:Connect(function()
 			self:_toggleSelected(mutant.Id)
 		end)
 
+		local infoBtn = Instance.new("TextButton")
+		infoBtn.AnchorPoint = Vector2.new(1, 0.5)
+		infoBtn.Position = UDim2.new(1, -48, 0.5, 0)
+		infoBtn.Size = UDim2.fromOffset(38, 38)
+		infoBtn.BackgroundColor3 = Color3.fromRGB(25, 48, 60)
+		infoBtn.Text = "INFO"
+		infoBtn.TextColor3 = COLORS.Cyan
+		infoBtn.Font = Enum.Font.GothamBold
+		infoBtn.TextSize = 10
+		infoBtn.Parent = card
+		addCorner(infoBtn, 8)
+		addStroke(infoBtn, COLORS.Cyan, 1, 0.5)
+		infoBtn.Activated:Connect(function()
+			self:_showStats(mutant)
+		end)
+
 		local release = Instance.new("TextButton")
 		release.AnchorPoint = Vector2.new(1, 0.5)
-		release.Position = UDim2.new(1, -9, 0.5, 0)
-		release.Size = UDim2.fromOffset(42, 42)
+		release.Position = UDim2.new(1, -6, 0.5, 0)
+		release.Size = UDim2.fromOffset(38, 38)
 		release.BackgroundColor3 = Color3.fromRGB(75, 43, 49)
 		release.Text = "×"
 		release.TextColor3 = COLORS.Red
 		release.Font = Enum.Font.GothamBold
-		release.TextSize = 25
+		release.TextSize = 24
 		release.Parent = card
-		addCorner(release, 9)
+		addCorner(release, 8)
 		local activeBattle = type(self._state.Battle) == "table" and self._state.Battle.MutantId == mutant.Id
 		local tutorialComplete = self._state.Tutorial and self._state.Tutorial.TutorialCompleted
 		local canRelease = tutorialComplete and #self._state.Mutants > 1 and not activeBattle
@@ -658,6 +1116,24 @@ function UIController:SetState(snapshot)
 	end
 	self:_renderInventory()
 	self:_refreshControls()
+	if self._squadUI then
+		self._squadUI:SetState(snapshot)
+	end
+	if self._combatUI then
+		local inExpedition = snapshot.Expedition ~= nil
+			and (
+				snapshot.Expedition.InCombat
+				or snapshot.Expedition.Status == "AtTerminal"
+				or snapshot.Expedition.Status == "Exploring"
+			)
+		if inExpedition then
+			self._panel.Visible = false
+			self._combatUI:UpdateCombat(snapshot.Expedition.CurrentCombat, snapshot.Expedition)
+		else
+			self._panel.Visible = true
+			self._combatUI:SetVisible(false)
+		end
+	end
 end
 
 function UIController:SetStatus(status, detail)
@@ -690,6 +1166,9 @@ function UIController:_refreshControls()
 	local slots = if self._state then (self._state.SlotsUnlocked or 0) else 0
 	setEnabled(self._create, ready and count < slots, COLORS.Cyan)
 	setEnabled(self._merge, ready and #self._selected == 2, COLORS.Purple)
+	if self._breedBtn then
+		setEnabled(self._breedBtn, ready and #self._selected == 2, COLORS.Lime)
+	end
 	local noBattle = self._state and self._state.Battle == false
 	setEnabled(self._battleButton, ready and #self._selected == 1 and noBattle, COLORS.Orange)
 	if self._busy then
@@ -715,17 +1194,39 @@ end
 
 function UIController:ShowResult(action, ok, code)
 	if ok then
+		local expedition = self._state and self._state.Expedition
+		if expedition and (action == "SelectCombatAction" or action == "ProceedNextRoom") then
+			if expedition.Status == "Completed" then
+				self:_playSound("Victory")
+				self:ShowToast(
+					"Expedition complete! Loot collected. Squad resting for 2 minutes.",
+					COLORS.Lime
+				)
+				return
+			elseif expedition.Status == "Failed" then
+				self:ShowToast(
+					"Expedition lost. Secured loot is safe; your squad can try again now.",
+					COLORS.Orange
+				)
+				return
+			end
+		end
 		local messages = {
 			CreateBlob = "New Blob stabilized.",
 			Merge = "Merge successful! Evolution completed.",
+			BreedMutants = "Genetic synthesis complete! Genes inherited.",
 			StartBattle = "Training started.",
+			StartExpedition = "Expedition squad deployed!",
+			SecureLoot = "Loot secured at expedition terminal.",
+			Evacuate = "Squad evacuated! Secured loot transferred.",
+			ProceedNextRoom = "Advancing to next expedition chamber.",
 			ReleaseMutant = "Specimen released. No refund was issued.",
 		}
 		if action == "CreateBlob" then
 			self:_playSound("Create")
-		elseif action == "Merge" then
+		elseif action == "Merge" or action == "BreedMutants" then
 			self:_playSound("Merge")
-		elseif action == "StartBattle" then
+		elseif action == "StartBattle" or action == "StartExpedition" then
 			self:_playSound("Battle")
 		else
 			self:_playSound("Click")
@@ -761,6 +1262,12 @@ function UIController:ShowToast(text, color)
 end
 
 function UIController:Destroy()
+	if self._squadUI then
+		self._squadUI:Destroy()
+	end
+	if self._combatUI then
+		self._combatUI:Destroy()
+	end
 	for _, connection in self._connections do
 		connection:Disconnect()
 	end

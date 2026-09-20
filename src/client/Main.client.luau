@@ -4,16 +4,17 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local root = ReplicatedStorage:WaitForChild("MutantLab")
 local shared = root:WaitForChild("Shared")
-local remotes = root:WaitForChild("Remotes")
 
 local GameConfig = require(shared:WaitForChild("Config"):WaitForChild("GameConfig"))
 local NetworkController = require(script.Parent.Controllers.NetworkController)
 local UIController = require(script.Parent.Controllers.UIController)
 local WorldController = require(script.Parent.Controllers.WorldController)
 
-local network
 local world = WorldController.new()
 world:Start()
+
+local remotes = root:WaitForChild("Remotes")
+local network
 
 local ui
 ui = UIController.new({

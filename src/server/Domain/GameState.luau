@@ -8,6 +8,7 @@ local PROFILE_KEYS = {
 	SlotsUnlocked = true,
 	Mutants = true,
 	Tutorial = true,
+	SecuredLoot = true,
 }
 
 local MUTANT_KEYS = {
@@ -15,6 +16,66 @@ local MUTANT_KEYS = {
 	Type = true,
 	Tier = true,
 	Level = true,
+	Role = true,
+	Genes = true,
+	RestUntil = true,
+}
+
+local MUTANT_REQUIRED_KEYS = {
+	Id = true,
+	Type = true,
+	Tier = true,
+	Level = true,
+}
+
+local SECURED_LOOT_KEYS = {
+	BioCoins = true,
+	DnaFragments = true,
+	Items = true,
+}
+
+local VALID_ROLES = {
+	Striker = true,
+	Guardian = true,
+	Healer = true,
+	Buffer = true,
+	Controller = true,
+}
+
+local VALID_ELEMENTS = {
+	Plasma = true,
+	Cryo = true,
+	Electro = true,
+	Toxin = true,
+	Shadow = true,
+	Biomass = true,
+}
+
+local MAX_GENE_SLOTS_BY_TIER: { [number]: number } = {
+	[1] = 3,
+	[2] = 4,
+	[3] = 5,
+}
+
+local STARTER_GENES_BY_TIER: { [number]: { { Element: string, Value: number } } } = {
+	[1] = {
+		{ Element = "Biomass", Value = 25 },
+		{ Element = "Plasma", Value = 20 },
+		{ Element = "Cryo", Value = 10 },
+	},
+	[2] = {
+		{ Element = "Toxin", Value = 50 },
+		{ Element = "Biomass", Value = 35 },
+		{ Element = "Cryo", Value = 25 },
+		{ Element = "Shadow", Value = 15 },
+	},
+	[3] = {
+		{ Element = "Plasma", Value = 85 },
+		{ Element = "Electro", Value = 65 },
+		{ Element = "Shadow", Value = 45 },
+		{ Element = "Cryo", Value = 30 },
+		{ Element = "Biomass", Value = 20 },
+	},
 }
 
 local TUTORIAL_KEYS = {
@@ -34,6 +95,24 @@ end
 
 local function isInteger(value: any): boolean
 	return isFiniteNumber(value) and value % 1 == 0
+end
+
+local function deepCopy(value: any, seen: { [any]: any }?): any
+	if type(value) ~= "table" then
+		return value
+	end
+
+	local copies = seen or {}
+	if copies[value] ~= nil then
+		return copies[value]
+	end
+
+	local result = {}
+	copies[value] = result
+	for key, child in pairs(value) do
+		result[deepCopy(key, copies)] = deepCopy(child, copies)
+	end
+	return result
 end
 
 local function hasExactKeys(value: any, expected: { [string]: boolean }): boolean
@@ -73,6 +152,47 @@ local function isStrictArray(value: any): boolean
 	return count == length
 end
 
+function GameState.migrateProfile(profile: any, _gameConfig: any, _mutantConfig: any): any
+	if type(profile) ~= "table" then
+		return profile
+	end
+
+	if profile.DataVersion == 2 then
+		return deepCopy(profile)
+	end
+
+	if profile.DataVersion ~= 1 then
+		return profile
+	end
+
+	local migrated = deepCopy(profile)
+	migrated.DataVersion = 2
+
+	if type(migrated.SecuredLoot) ~= "table" then
+		migrated.SecuredLoot = {
+			BioCoins = 0,
+			DnaFragments = 0,
+			Items = {},
+		}
+	end
+
+	if type(migrated.Mutants) == "table" then
+		for _, mutant in ipairs(migrated.Mutants) do
+			if type(mutant) == "table" then
+				if mutant.Role == nil or not VALID_ROLES[mutant.Role] then
+					mutant.Role = "Striker"
+				end
+				if mutant.Genes == nil or type(mutant.Genes) ~= "table" or #mutant.Genes == 0 then
+					local starter = STARTER_GENES_BY_TIER[mutant.Tier] or STARTER_GENES_BY_TIER[1]
+					mutant.Genes = deepCopy(starter)
+				end
+			end
+		end
+	end
+
+	return migrated
+end
+
 function GameState.newProfile(gameConfig: any): any
 	return {
 		DataVersion = gameConfig.DataVersion,
@@ -88,6 +208,11 @@ function GameState.newProfile(gameConfig: any): any
 			FirstBattleCompleted = false,
 			FirstBlobPurchased = false,
 			TutorialCompleted = false,
+		},
+		SecuredLoot = {
+			BioCoins = 0,
+			DnaFragments = 0,
+			Items = {},
 		},
 	}
 end
@@ -116,12 +241,36 @@ function GameState.validateProfile(profile: any, gameConfig: any, mutantConfig: 
 		return false
 	end
 
+	local securedLoot = profile.SecuredLoot
+	if not hasExactKeys(securedLoot, SECURED_LOOT_KEYS) then
+		return false
+	end
+	if
+		not isInteger(securedLoot.BioCoins)
+		or securedLoot.BioCoins < 0
+		or not isInteger(securedLoot.DnaFragments)
+		or securedLoot.DnaFragments < 0
+		or type(securedLoot.Items) ~= "table"
+	then
+		return false
+	end
+
 	local ids = {}
 	local acquisitionUnits = 0
 	local hasToxicBlob = false
 	for _, mutant in ipairs(profile.Mutants) do
-		if not hasExactKeys(mutant, MUTANT_KEYS) then
+		if type(mutant) ~= "table" then
 			return false
+		end
+		for key in pairs(mutant) do
+			if type(key) ~= "string" or not MUTANT_KEYS[key] then
+				return false
+			end
+		end
+		for key in pairs(MUTANT_REQUIRED_KEYS) do
+			if mutant[key] == nil then
+				return false
+			end
 		end
 		if type(mutant.Id) ~= "string" or #mutant.Id < 1 or #mutant.Id > 64 or ids[mutant.Id] then
 			return false
@@ -140,6 +289,37 @@ function GameState.validateProfile(profile: any, gameConfig: any, mutantConfig: 
 			or mutant.Level ~= 1
 		then
 			return false
+		end
+		if mutant.Role ~= nil and (type(mutant.Role) ~= "string" or not VALID_ROLES[mutant.Role]) then
+			return false
+		end
+		if mutant.RestUntil ~= nil and not isFiniteNumber(mutant.RestUntil) then
+			return false
+		end
+		if mutant.Genes ~= nil then
+			if not isStrictArray(mutant.Genes) then
+				return false
+			end
+			local maxSlots = MAX_GENE_SLOTS_BY_TIER[mutant.Tier] or 3
+			if #mutant.Genes > maxSlots then
+				return false
+			end
+			local geneElements = {}
+			for _, gene in ipairs(mutant.Genes) do
+				if type(gene) ~= "table" then
+					return false
+				end
+				if type(gene.Element) ~= "string" or not VALID_ELEMENTS[gene.Element] then
+					return false
+				end
+				if not isInteger(gene.Value) or gene.Value < 1 or gene.Value > 100 then
+					return false
+				end
+				if geneElements[gene.Element] then
+					return false
+				end
+				geneElements[gene.Element] = true
+			end
 		end
 		if mutant.Type == "Blob" then
 			acquisitionUnits += 1
@@ -242,6 +422,9 @@ function GameState.snapshot(profile: any, battle: any, revision: number, mode: s
 			Type = mutant.Type,
 			Tier = mutant.Tier,
 			Level = mutant.Level,
+			Role = mutant.Role or "Striker",
+			Genes = if mutant.Genes then deepCopy(mutant.Genes) else nil,
+			RestUntil = mutant.RestUntil,
 		}
 	end
 
@@ -254,6 +437,15 @@ function GameState.snapshot(profile: any, battle: any, revision: number, mode: s
 			StartedAt = battle.StartedAt,
 			EndsAt = battle.EndsAt,
 			Reward = battle.Reward,
+		}
+	end
+
+	local securedLoot = nil
+	if type(profile.SecuredLoot) == "table" then
+		securedLoot = {
+			BioCoins = profile.SecuredLoot.BioCoins,
+			DnaFragments = profile.SecuredLoot.DnaFragments,
+			Items = deepCopy(profile.SecuredLoot.Items),
 		}
 	end
 
@@ -271,6 +463,7 @@ function GameState.snapshot(profile: any, battle: any, revision: number, mode: s
 			FirstBlobPurchased = tutorial.FirstBlobPurchased,
 			TutorialCompleted = tutorial.TutorialCompleted,
 		},
+		SecuredLoot = securedLoot,
 		Battle = publicBattle,
 		Revision = revision,
 		PersistenceMode = mode,

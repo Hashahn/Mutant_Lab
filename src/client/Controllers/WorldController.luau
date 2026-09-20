@@ -23,6 +23,11 @@ local COLORS = {
 	Orange = Color3.fromRGB(255, 164, 73),
 	Red = Color3.fromRGB(241, 91, 102),
 	Lime = Color3.fromRGB(166, 244, 83),
+	DeepSlate = Color3.fromRGB(20, 26, 35),
+	Panel = Color3.fromRGB(30, 38, 48),
+	PanelSoft = Color3.fromRGB(27, 37, 47),
+	Electric = Color3.fromRGB(255, 230, 70),
+	Cryo = Color3.fromRGB(110, 220, 255),
 }
 
 local function addCorner(parent, radius)
@@ -400,6 +405,86 @@ local function makeHologramPlaceholder(parent, mutant, at, order)
 	return model
 end
 
+local function makeEnemyUnit(parent, enemy, at, order)
+	local model = Instance.new("Model")
+	model.Name = tostring(enemy.Id)
+	model:SetAttribute("EnemyId", enemy.Id)
+	model:SetAttribute("Order", order or 1)
+
+	local elem = if enemy.Stats and enemy.Stats.EffectiveElements
+		then enemy.Stats.EffectiveElements.Primary
+		else "Toxin"
+	local bodyColor = if elem == "Plasma"
+		then Color3.fromRGB(170, 70, 255)
+		elseif elem == "Toxin" then COLORS.Toxic
+		elseif elem == "Cryo" then COLORS.Cryo
+		elseif elem == "Electro" then COLORS.Electric
+		elseif elem == "Shadow" then Color3.fromRGB(190, 40, 60)
+		else COLORS.Orange
+
+	local bodySize = Vector3.new(3.6, 3.2, 3.6)
+	local body = part(model, "Body", bodySize, at * CFrame.new(0, 1.8, 0), bodyColor, Enum.Material.Neon)
+	body.Shape = Enum.PartType.Ball
+	model.PrimaryPart = body
+
+	for index, x in { -0.6, 0.6 } do
+		local eye = part(
+			model,
+			"Eye_" .. tostring(index),
+			Vector3.new(0.5, 0.6, 0.3),
+			at * CFrame.new(x, 2.1, -1.5),
+			COLORS.Red,
+			Enum.Material.Neon
+		)
+		eye.Shape = Enum.PartType.Ball
+	end
+
+	local hl = Instance.new("Highlight")
+	hl.Name = "EnemyHighlight"
+	hl.FillColor = bodyColor
+	hl.FillTransparency = 0.65
+	hl.OutlineColor = COLORS.Red
+	hl.OutlineTransparency = 0.2
+	hl.Adornee = model
+	hl.Parent = model
+
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "EnemyUI"
+	gui.Size = UDim2.fromOffset(160, 42)
+	gui.StudsOffset = Vector3.new(0, 3.4, 0)
+	gui.AlwaysOnTop = true
+	gui.Parent = body
+
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Size = UDim2.new(1, 0, 0, 20)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextSize = 13
+	nameLabel.TextColor3 = COLORS.Red
+	nameLabel.Text = string.format("[E] %s", enemy.Name)
+	nameLabel.Parent = gui
+
+	local hpBarBg = Instance.new("Frame")
+	hpBarBg.Size = UDim2.new(1, -20, 0, 6)
+	hpBarBg.Position = UDim2.new(0, 10, 0, 22)
+	hpBarBg.BackgroundColor3 = COLORS.PanelSoft
+	hpBarBg.Parent = gui
+	addCorner(hpBarBg, 3)
+
+	local hpPct = math.clamp(enemy.CurrentHp / math.max(1, enemy.MaxHp), 0, 1)
+	local hpFill = Instance.new("Frame")
+	hpFill.Size = UDim2.new(hpPct, 0, 1, 0)
+	hpFill.BackgroundColor3 = if hpPct > 0.5
+		then COLORS.Lime
+		elseif hpPct > 0.25 then COLORS.Orange
+		else COLORS.Red
+	hpFill.Parent = hpBarBg
+	addCorner(hpFill, 3)
+
+	model.Parent = parent
+	return model
+end
+
 local function makeDummy(parent, at)
 	local baseCFrame = at or CFrame.new(0.5, 0.9, 8)
 	local model = Instance.new("Model")
@@ -494,6 +579,8 @@ function WorldController.new()
 	self._knownMutants = nil
 	self._activeMerge = nil
 	self._mergeFolder = nil
+	self._dnaHelixModel = nil
+	self._portalRingModel = nil
 	return self
 end
 
@@ -506,21 +593,48 @@ function WorldController:Start()
 	local Lighting = game:GetService("Lighting")
 	self._lightingEffects = {}
 	pcall(function()
+		Lighting.Ambient = Color3.fromRGB(45, 52, 65)
+		Lighting.OutdoorAmbient = Color3.fromRGB(35, 42, 55)
+		Lighting.Brightness = 1.5
+
 		local cc = Instance.new("ColorCorrectionEffect")
 		cc.Name = "MutantLabColor"
-		cc.Saturation = 0.05
-		cc.Contrast = 0.04
+		cc.Saturation = 0.12
+		cc.Contrast = 0.1
 		cc.Brightness = 0
+		cc.TintColor = Color3.fromRGB(245, 248, 255)
 		cc.Parent = Lighting
 		table.insert(self._lightingEffects, cc)
+
+		local bloom = Instance.new("BloomEffect")
+		bloom.Name = "MutantLabBloom"
+		bloom.Intensity = 0.35
+		bloom.Size = 16
+		bloom.Threshold = 1.15
+		bloom.Parent = Lighting
+		table.insert(self._lightingEffects, bloom)
+
+		local atmosphere = Instance.new("Atmosphere")
+		atmosphere.Name = "MutantLabAtmosphere"
+		atmosphere.Density = 0.18
+		atmosphere.Offset = 0
+		atmosphere.Color = Color3.fromRGB(180, 210, 230)
+		atmosphere.Decay = Color3.fromRGB(70, 95, 125)
+		atmosphere.Glare = 0
+		atmosphere.Haze = 0
+		atmosphere.Parent = Lighting
+		table.insert(self._lightingEffects, atmosphere)
 	end)
 
 	local function onCharacterAdded(char)
 		task.spawn(function()
 			local hrp = char:WaitForChild("HumanoidRootPart", 5)
 			if hrp and hrp:IsA("BasePart") then
-				if hrp.Position.Y < 0 or (hrp.Position - Vector3.new(-3, 3, -10)).Magnitude > 60 then
-					hrp.CFrame = CFrame.new(-3, 3, -10)
+				-- Safe character grounding: prevent void fall, zero momentum, orient towards lab
+				if hrp.Position.Y < 0 or (hrp.Position - Vector3.new(0, 3, -12)).Magnitude > 90 then
+					hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+					hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+					hrp.CFrame = CFrame.lookAt(Vector3.new(0, 3.2, -12), Vector3.new(0, 3.2, 5))
 				end
 			end
 			for _, desc in char:GetDescendants() do
@@ -544,63 +658,501 @@ function WorldController:Start()
 	architecture.Name = "Architecture"
 	architecture.Parent = root
 
-	-- Solid Laboratory Floor with collision
+	-- 1. Modular Sci-Fi Tiled Floor with Structural Sub-Floor
 	part(
 		architecture,
 		"Floor",
-		Vector3.new(48, 2, 44),
-		CFrame.new(-3, -1, 0),
-		Color3.fromRGB(28, 36, 44),
-		Enum.Material.SmoothPlastic,
+		Vector3.new(62, 2, 50),
+		CFrame.new(0, -1, 3),
+		COLORS.DeepSlate,
+		Enum.Material.Metal,
 		true
 	)
 
-	-- Perimeter Walls with collision
+	-- Central Runway Corridor
+	part(
+		architecture,
+		"CentralRunway",
+		Vector3.new(5, 0.05, 22),
+		CFrame.new(0, 0.03, -2),
+		COLORS.Panel,
+		Enum.Material.SmoothPlastic,
+		false
+	)
+	part(
+		architecture,
+		"RunwayConduitL",
+		Vector3.new(0.25, 0.08, 22),
+		CFrame.new(-2.6, 0.04, -2),
+		COLORS.Cyan,
+		Enum.Material.Neon,
+		false
+	)
+	part(
+		architecture,
+		"RunwayConduitR",
+		Vector3.new(0.25, 0.08, 22),
+		CFrame.new(2.6, 0.04, -2),
+		COLORS.Cyan,
+		Enum.Material.Neon,
+		false
+	)
+	for _, z in { -8, -2, 4 } do
+		part(
+			architecture,
+			"FloorTrench_" .. tostring(z),
+			Vector3.new(36, 0.06, 0.25),
+			CFrame.new(0, 0.03, z),
+			COLORS.Cyan,
+			Enum.Material.Neon,
+			false
+		)
+	end
+
+	-- 2. Arrival Deck Platform (Spawn Dais)
+	part(
+		architecture,
+		"ArrivalDais",
+		Vector3.new(12, 0.5, 12),
+		CFrame.new(0, 0.25, -12),
+		COLORS.Panel,
+		Enum.Material.Metal,
+		true
+	)
+	part(
+		architecture,
+		"DaisRim",
+		Vector3.new(12.4, 0.15, 12.4),
+		CFrame.new(0, 0.52, -12),
+		COLORS.Cyan,
+		Enum.Material.Neon,
+		false
+	)
+	local daisDisc = part(
+		architecture,
+		"DaisDisc",
+		Vector3.new(0.08, 8, 8),
+		CFrame.new(0, 0.53, -12) * CFrame.Angles(0, 0, math.pi / 2),
+		COLORS.Ink,
+		Enum.Material.SmoothPlastic,
+		false
+	)
+	daisDisc.Shape = Enum.PartType.Cylinder
+
+	part(
+		architecture,
+		"Chevron1",
+		Vector3.new(1.8, 0.08, 0.4),
+		CFrame.new(-4.5, 0.54, -16.5) * CFrame.Angles(0, math.pi / 4, 0),
+		COLORS.Orange,
+		Enum.Material.Neon,
+		false
+	)
+	part(
+		architecture,
+		"Chevron2",
+		Vector3.new(1.8, 0.08, 0.4),
+		CFrame.new(4.5, 0.54, -16.5) * CFrame.Angles(0, -math.pi / 4, 0),
+		COLORS.Orange,
+		Enum.Material.Neon,
+		false
+	)
+	part(
+		architecture,
+		"Chevron3",
+		Vector3.new(1.8, 0.08, 0.4),
+		CFrame.new(-4.5, 0.54, -7.5) * CFrame.Angles(0, -math.pi / 4, 0),
+		COLORS.Orange,
+		Enum.Material.Neon,
+		false
+	)
+	part(
+		architecture,
+		"Chevron4",
+		Vector3.new(1.8, 0.08, 0.4),
+		CFrame.new(4.5, 0.54, -7.5) * CFrame.Angles(0, math.pi / 4, 0),
+		COLORS.Orange,
+		Enum.Material.Neon,
+		false
+	)
+
+	local arrivalCeiling = part(
+		architecture,
+		"ArrivalLightFixture",
+		Vector3.new(3.5, 0.5, 3.5),
+		CFrame.new(0, 15.5, -12),
+		COLORS.Metal,
+		Enum.Material.Metal
+	)
+	local arrivalSpot = Instance.new("SpotLight")
+	arrivalSpot.Name = "ArrivalSpot"
+	arrivalSpot.Color = Color3.fromRGB(210, 240, 255)
+	arrivalSpot.Range = 24
+	arrivalSpot.Angle = 55
+	arrivalSpot.Brightness = 1.2
+	arrivalSpot.Face = Enum.NormalId.Bottom
+	arrivalSpot.Parent = arrivalCeiling
+	labelOn(arrivalCeiling, "ARRIVAL DECK // SECTOR 0", Vector3.new(0, -1.2, 0), COLORS.Cyan)
+
+	-- 3. Perimeter Walls & Panoramic Observation Viewport
 	part(
 		architecture,
 		"BackWall",
-		Vector3.new(48, 14, 2),
-		CFrame.new(-3, 6, 15),
+		Vector3.new(62, 16, 2),
+		CFrame.new(0, 8, 26),
+		COLORS.Ink,
+		Enum.Material.Metal,
+		true
+	)
+	local obsWin = part(
+		architecture,
+		"ObservationWindow",
+		Vector3.new(28, 8, 0.4),
+		CFrame.new(0, 8, 25.9),
+		Color3.fromRGB(70, 160, 220),
+		Enum.Material.Glass,
+		true
+	)
+	obsWin.Transparency = 0.45
+	part(
+		architecture,
+		"WindowFrameTop",
+		Vector3.new(29, 0.6, 0.8),
+		CFrame.new(0, 12.2, 25.8),
+		COLORS.Metal,
+		Enum.Material.Metal
+	)
+	part(
+		architecture,
+		"WindowFrameBottom",
+		Vector3.new(29, 0.6, 0.8),
+		CFrame.new(0, 3.8, 25.8),
+		COLORS.Metal,
+		Enum.Material.Metal
+	)
+	labelOn(obsWin, "OBSERVATION DECK // CONTAINMENT SECTOR", Vector3.new(0, 4.8, -0.3), COLORS.Cyan)
+
+	part(
+		architecture,
+		"FrontWall",
+		Vector3.new(62, 16, 2),
+		CFrame.new(0, 8, -20),
 		COLORS.Ink,
 		Enum.Material.Metal,
 		true
 	)
 	part(
 		architecture,
-		"FrontWall",
-		Vector3.new(48, 8, 2),
-		CFrame.new(-3, 3, -22),
-		Color3.fromRGB(34, 44, 52),
-		Enum.Material.Metal,
-		true
+		"AirlockArch",
+		Vector3.new(16, 0.6, 2.4),
+		CFrame.new(0, 12, -19.6),
+		COLORS.Cyan,
+		Enum.Material.Neon
 	)
+
 	part(
 		architecture,
 		"LeftWall",
-		Vector3.new(2, 14, 44),
-		CFrame.new(-27, 6, 0),
-		Color3.fromRGB(34, 44, 52),
+		Vector3.new(2, 16, 48),
+		CFrame.new(-31, 8, 3),
+		COLORS.Panel,
 		Enum.Material.Metal,
 		true
 	)
 	part(
 		architecture,
 		"RightWall",
-		Vector3.new(2, 14, 44),
-		CFrame.new(21, 6, 0),
-		Color3.fromRGB(34, 44, 52),
+		Vector3.new(2, 16, 48),
+		CFrame.new(31, 8, 3),
+		COLORS.Panel,
 		Enum.Material.Metal,
 		true
 	)
 
+	-- Wall Columns with Vertical Neon Conduits
+	for _, z in { -12, -2, 8, 18 } do
+		part(
+			architecture,
+			"ColL_" .. tostring(z),
+			Vector3.new(1.2, 16, 2.2),
+			CFrame.new(-30.2, 8, z),
+			COLORS.DeepSlate,
+			Enum.Material.Metal,
+			true
+		)
+		part(
+			architecture,
+			"StripL_" .. tostring(z),
+			Vector3.new(0.15, 14, 0.3),
+			CFrame.new(-29.5, 8, z),
+			COLORS.Cyan,
+			Enum.Material.Neon
+		)
+		part(
+			architecture,
+			"ColR_" .. tostring(z),
+			Vector3.new(1.2, 16, 2.2),
+			CFrame.new(30.2, 8, z),
+			COLORS.DeepSlate,
+			Enum.Material.Metal,
+			true
+		)
+		part(
+			architecture,
+			"StripR_" .. tostring(z),
+			Vector3.new(0.15, 14, 0.3),
+			CFrame.new(29.5, 8, z),
+			COLORS.Cyan,
+			Enum.Material.Neon
+		)
+	end
+
+	-- 4. Ceiling & Structural Trusses
 	part(
 		architecture,
-		"LightStrip",
-		Vector3.new(25, 0.35, 0.25),
-		CFrame.new(0, 9, 13.42),
-		COLORS.Cyan,
-		Enum.Material.SmoothPlastic
+		"Ceiling",
+		Vector3.new(62, 2, 48),
+		CFrame.new(0, 16, 3),
+		COLORS.DeepSlate,
+		Enum.Material.Metal,
+		true
 	)
+	for _, z in { -12, -2, 8, 18 } do
+		part(
+			architecture,
+			"Truss_" .. tostring(z),
+			Vector3.new(62, 1.2, 1.2),
+			CFrame.new(0, 15, z),
+			COLORS.Metal,
+			Enum.Material.Metal
+		)
+		local trussLight = Instance.new("PointLight")
+		trussLight.Name = "TrussLight"
+		trussLight.Color = Color3.fromRGB(220, 240, 255)
+		trussLight.Range = 22
+		trussLight.Brightness = 0.45
+		trussLight.Parent = architecture:FindFirstChild("Truss_" .. tostring(z))
+	end
+
+	-- 5. Station 1: Specimen Cryo-Tubes (Containment Pods)
+	for _, spec in
+		{
+			{ x = -18, z = 14, color = COLORS.Cyan, label = "CRYO-CHAMBER 01" },
+			{ x = 18, z = 14, color = COLORS.Toxic, label = "CRYO-CHAMBER 02" },
+		}
+	do
+		local tubeBase = part(
+			architecture,
+			"TubeBase_" .. spec.x,
+			Vector3.new(4.2, 0.8, 4.2),
+			CFrame.new(spec.x, 0.4, spec.z),
+			COLORS.Metal,
+			Enum.Material.Metal,
+			true
+		)
+		local tubeTop = part(
+			architecture,
+			"TubeTop_" .. spec.x,
+			Vector3.new(4.2, 0.8, 4.2),
+			CFrame.new(spec.x, 8.2, spec.z),
+			COLORS.Metal,
+			Enum.Material.Metal,
+			true
+		)
+		local tubeGlass = part(
+			architecture,
+			"TubeGlass_" .. spec.x,
+			Vector3.new(7.2, 3.8, 3.8),
+			CFrame.new(spec.x, 4.3, spec.z) * CFrame.Angles(0, 0, math.pi / 2),
+			Color3.fromRGB(100, 230, 245),
+			Enum.Material.Glass
+		)
+		tubeGlass.Shape = Enum.PartType.Cylinder
+		tubeGlass.Transparency = 0.5
+
+		local tubeFluid = part(
+			architecture,
+			"TubeFluid_" .. spec.x,
+			Vector3.new(6.6, 3.2, 3.2),
+			CFrame.new(spec.x, 4.3, spec.z) * CFrame.Angles(0, 0, math.pi / 2),
+			spec.color,
+			Enum.Material.Neon
+		)
+		tubeFluid.Shape = Enum.PartType.Cylinder
+		tubeFluid.Transparency = 0.65
+
+		local podLight = Instance.new("PointLight")
+		podLight.Name = "PodLight"
+		podLight.Color = spec.color
+		podLight.Range = 10
+		podLight.Brightness = 0.85
+		podLight.Parent = tubeFluid
+
+		local bubbleEmitter = Instance.new("ParticleEmitter")
+		bubbleEmitter.Name = "Bubbles"
+		bubbleEmitter.Rate = 10
+		bubbleEmitter.Speed = NumberRange.new(1.2, 2.5)
+		bubbleEmitter.Acceleration = Vector3.new(0, 3, 0)
+		bubbleEmitter.Lifetime = NumberRange.new(1.5, 2.5)
+		bubbleEmitter.Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.12),
+			NumberSequenceKeypoint.new(1, 0.28),
+		})
+		bubbleEmitter.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.2),
+			NumberSequenceKeypoint.new(1, 0.8),
+		})
+		bubbleEmitter.Color = ColorSequence.new(spec.color)
+		bubbleEmitter.Parent = tubeFluid
+
+		labelOn(tubeTop, spec.label, Vector3.new(0, 1.2, 0), spec.color)
+	end
+
+	-- 6. Station 2: Genetic Synthesis / Breeding Console (West Wing)
+	part(
+		architecture,
+		"BreedingDais",
+		Vector3.new(8, 0.5, 8),
+		CFrame.new(-20, 0.25, -2),
+		COLORS.Panel,
+		Enum.Material.Metal,
+		true
+	)
+	local breedingConsole = part(
+		architecture,
+		"BreedingConsole",
+		Vector3.new(4, 2.4, 2),
+		CFrame.new(-20, 1.4, -2),
+		COLORS.Metal,
+		Enum.Material.Metal,
+		true
+	)
+	local synthScreenGui = Instance.new("SurfaceGui")
+	synthScreenGui.Name = "SynthScreen"
+	synthScreenGui.Face = Enum.NormalId.Front
+	synthScreenGui.AlwaysOnTop = true
+	synthScreenGui.Parent = breedingConsole
+
+	local screenFrame = Instance.new("Frame")
+	screenFrame.Size = UDim2.fromScale(1, 1)
+	screenFrame.BackgroundColor3 = COLORS.Ink
+	screenFrame.Parent = synthScreenGui
+
+	local screenTitle = Instance.new("TextLabel")
+	screenTitle.Size = UDim2.new(1, -12, 0, 32)
+	screenTitle.Position = UDim2.new(0, 6, 0, 8)
+	screenTitle.BackgroundTransparency = 1
+	screenTitle.Text = "GENOME SYNTHESIS // LAB-01"
+	screenTitle.TextColor3 = COLORS.Purple
+	screenTitle.Font = Enum.Font.GothamBold
+	screenTitle.TextScaled = true
+	screenTitle.Parent = screenFrame
+
+	local screenSub = Instance.new("TextLabel")
+	screenSub.Size = UDim2.new(1, -12, 0, 24)
+	screenSub.Position = UDim2.new(0, 6, 0, 44)
+	screenSub.BackgroundTransparency = 1
+	screenSub.Text = "RECOMBINATION SEQUENCE READY"
+	screenSub.TextColor3 = COLORS.Cyan
+	screenSub.Font = Enum.Font.Gotham
+	screenSub.TextScaled = true
+	screenSub.Parent = screenFrame
+
+	local statusBar = Instance.new("Frame")
+	statusBar.Size = UDim2.new(0.9, 0, 0, 12)
+	statusBar.Position = UDim2.new(0.05, 0, 0, 80)
+	statusBar.BackgroundColor3 = COLORS.Purple
+	statusBar.BorderSizePixel = 0
+	statusBar.Parent = screenFrame
+	addCorner(statusBar, 4)
+
+	local dnaHelixModel = Instance.new("Model")
+	dnaHelixModel.Name = "DNAHelix"
+	local helixCore = part(
+		dnaHelixModel,
+		"HelixCore",
+		Vector3.new(0.6, 3.2, 0.6),
+		CFrame.new(-20, 3.8, -2),
+		COLORS.Cyan,
+		Enum.Material.Neon
+	)
+	helixCore.Shape = Enum.PartType.Cylinder
+	helixCore.Transparency = 0.5
+	dnaHelixModel.PrimaryPart = helixCore
+
+	local helixRing1 = part(
+		dnaHelixModel,
+		"HelixRing1",
+		Vector3.new(0.12, 3.4, 3.4),
+		CFrame.new(-20, 3.8, -2) * CFrame.Angles(0, 0, math.pi / 2),
+		COLORS.Purple,
+		Enum.Material.Neon
+	)
+	helixRing1.Shape = Enum.PartType.Cylinder
+	helixRing1.Transparency = 0.35
+
+	local helixRing2 = part(
+		dnaHelixModel,
+		"HelixRing2",
+		Vector3.new(0.12, 3.0, 3.0),
+		CFrame.new(-20, 3.8, -2) * CFrame.Angles(math.pi / 4, 0, math.pi / 2),
+		COLORS.Cyan,
+		Enum.Material.Neon
+	)
+	helixRing2.Shape = Enum.PartType.Cylinder
+	helixRing2.Transparency = 0.35
+
+	dnaHelixModel.Parent = architecture
+	self._dnaHelixModel = dnaHelixModel
+
+	labelOn(breedingConsole, "GENETIC SYNTHESIS // BREEDING", Vector3.new(0, 2.4, 0), COLORS.Purple)
+
+	-- 7. Station 3: Expedition Quantum Gateway (East Wing)
+	local expPad = part(
+		architecture,
+		"ExpeditionPad",
+		Vector3.new(0.4, 8, 8),
+		CFrame.new(20, 0.2, -2) * CFrame.Angles(0, 0, math.pi / 2),
+		COLORS.Panel,
+		Enum.Material.Metal,
+		true
+	)
+	expPad.Shape = Enum.PartType.Cylinder
+
+	local portalRing = part(
+		architecture,
+		"PortalRing",
+		Vector3.new(0.12, 8.4, 8.4),
+		CFrame.new(20, 0.4, -2) * CFrame.Angles(0, 0, math.pi / 2),
+		COLORS.Purple,
+		Enum.Material.Neon,
+		false
+	)
+	portalRing.Shape = Enum.PartType.Cylinder
+	self._portalRingModel = portalRing
+
+	local portalCol = part(
+		architecture,
+		"PortalColumn",
+		Vector3.new(6, 5, 5),
+		CFrame.new(20, 3.2, -2) * CFrame.Angles(0, 0, math.pi / 2),
+		COLORS.Purple,
+		Enum.Material.ForceField,
+		false
+	)
+	portalCol.Shape = Enum.PartType.Cylinder
+	portalCol.Transparency = 0.65
+
+	local portalLight = Instance.new("PointLight")
+	portalLight.Name = "PortalLight"
+	portalLight.Color = COLORS.Purple
+	portalLight.Range = 12
+	portalLight.Brightness = 1.0
+	portalLight.Parent = portalCol
+
+	labelOn(portalCol, "QUANTUM GATEWAY // EXPEDITIONS", Vector3.new(0, 3.8, 0), COLORS.Purple)
+
+	-- 8. Station 4: Central Combat Arena & 6 Mutant Pads
 	part(
 		architecture,
 		"ArenaPlatform",
@@ -616,7 +1168,7 @@ function WorldController:Start()
 		Vector3.new(15.4, 0.12, 6.4),
 		CFrame.new(-3, 0.91, 8),
 		COLORS.Orange,
-		Enum.Material.SmoothPlastic
+		Enum.Material.Neon
 	)
 	part(
 		architecture,
@@ -624,7 +1176,7 @@ function WorldController:Start()
 		Vector3.new(0.25, 0.05, 5.8),
 		CFrame.new(-3, 0.93, 8),
 		Color3.fromRGB(255, 205, 110),
-		Enum.Material.SmoothPlastic
+		Enum.Material.Neon
 	)
 	local chamberSign = part(
 		architecture,
@@ -635,6 +1187,16 @@ function WorldController:Start()
 		Enum.Material.SmoothPlastic
 	)
 	labelOn(chamberSign, "TEST CHAMBER // SECTOR 1", Vector3.new(0, 0, 0.2), COLORS.Orange)
+
+	local arenaSpotLight = Instance.new("SpotLight")
+	arenaSpotLight.Name = "ArenaSpot"
+	arenaSpotLight.Color = Color3.fromRGB(255, 230, 180)
+	arenaSpotLight.Range = 24
+	arenaSpotLight.Angle = 60
+	arenaSpotLight.Brightness = 1.0
+	arenaSpotLight.Face = Enum.NormalId.Bottom
+	arenaSpotLight.Parent = chamberSign
+
 	for index = 1, 6 do
 		local x = -13 + (index - 1) * 5.1
 		part(
@@ -642,7 +1204,7 @@ function WorldController:Start()
 			"Pad",
 			Vector3.new(4.2, 0.35, 4.2),
 			CFrame.new(x, 0.3, 3),
-			Color3.fromRGB(34, 46, 54),
+			COLORS.Panel,
 			Enum.Material.Metal,
 			true
 		)
@@ -653,59 +1215,14 @@ function WorldController:Start()
 			Vector3.new(3.5, 0.12, 3.5),
 			CFrame.new(x, 0.51, 3),
 			glowColor,
-			Enum.Material.SmoothPlastic
+			Enum.Material.Neon
 		)
 		local padLight = Instance.new("PointLight")
 		padLight.Name = "PadLight"
 		padLight.Color = glowColor
-		padLight.Range = 4
-		padLight.Brightness = 0.25
+		padLight.Range = 5
+		padLight.Brightness = 0.35
 		padLight.Parent = padGlow
-	end
-
-	local chamberCeiling = part(
-		architecture,
-		"ChamberCeilingLight",
-		Vector3.new(3, 0.4, 3),
-		CFrame.new(0, 11, 8),
-		COLORS.Metal,
-		Enum.Material.Metal
-	)
-	local chamberSpot = Instance.new("SpotLight")
-	chamberSpot.Name = "ChamberSpot"
-	chamberSpot.Color = Color3.fromRGB(255, 230, 180)
-	chamberSpot.Range = 22
-	chamberSpot.Angle = 60
-	chamberSpot.Brightness = 1.0
-	chamberSpot.Face = Enum.NormalId.Bottom
-	chamberSpot.Parent = chamberCeiling
-
-	for _, x in { -14, 13 } do
-		local tube = part(
-			architecture,
-			"SpecimenTube",
-			Vector3.new(3, 7, 3),
-			CFrame.new(x, 4.1, 10.5),
-			Color3.fromRGB(74, 147, 145),
-			Enum.Material.Glass
-		)
-		tube.Transparency = 0.45
-		part(
-			architecture,
-			"TubeTop",
-			Vector3.new(3.4, 0.5, 3.4),
-			CFrame.new(x, 7.8, 10.5),
-			COLORS.Metal,
-			Enum.Material.Metal
-		)
-		part(
-			architecture,
-			"TubeBase",
-			Vector3.new(3.4, 0.5, 3.4),
-			CFrame.new(x, 0.5, 10.5),
-			COLORS.Metal,
-			Enum.Material.Metal
-		)
 	end
 
 	local display = Instance.new("Folder")
@@ -716,6 +1233,10 @@ function WorldController:Start()
 	battleFolder.Name = "Battle"
 	battleFolder.Parent = root
 	self._battleFolder = battleFolder
+	local expeditionFolder = Instance.new("Folder")
+	expeditionFolder.Name = "Expedition"
+	expeditionFolder.Parent = root
+	self._expeditionFolder = expeditionFolder
 
 	local camera = workspace.CurrentCamera
 	if camera then
@@ -731,10 +1252,22 @@ function WorldController:Start()
 	end
 
 	self._renderConnection = RunService.RenderStepped:Connect(function()
+		local now = os.clock()
 		self:_animateBlobs()
 		self:_animateBattle()
 		if self._activeMerge then
-			self:_updateMergeAnimation(os.clock())
+			self:_updateMergeAnimation(now)
+		end
+		if self._dnaHelixModel and self._dnaHelixModel.PrimaryPart then
+			self._dnaHelixModel:PivotTo(
+				CFrame.new(-20, 3.8 + math.sin(now * 2) * 0.15, -2)
+					* CFrame.Angles(0, now * 0.8, math.sin(now * 1.5) * 0.1)
+			)
+		end
+		if self._portalRingModel then
+			self._portalRingModel.CFrame = CFrame.new(20, 0.4 + math.sin(now * 3) * 0.04, -2)
+				* CFrame.Angles(0, now * 1.4, 0)
+				* CFrame.Angles(0, 0, math.pi / 2)
 		end
 	end)
 end
@@ -1032,8 +1565,71 @@ function WorldController:_completeMergeAnimation()
 	end
 end
 
-function WorldController:HandleActionResult(_action, _ok, _code)
-	-- Ready for action-specific reactions if needed
+function WorldController:HandleActionResult(action, ok, _code)
+	if not self._root or not ok then
+		return
+	end
+	if action == "BreedMutants" then
+		spawnShockwave(self._root, Vector3.new(-20, 3.8, -2), COLORS.Purple, 6, 0.8)
+		spawnFloatingBanner(
+			self._root,
+			"🧬 GENETIC SYNTHESIS COMPLETE!",
+			Vector3.new(-20, 5.5, -2),
+			COLORS.Lime,
+			Color3.fromRGB(30, 15, 50),
+			1.4
+		)
+	elseif action == "StartExpedition" then
+		spawnShockwave(self._root, Vector3.new(20, 3.2, -2), COLORS.Purple, 8, 1.0)
+		spawnFloatingBanner(
+			self._root,
+			"⚡ SQUAD DEPLOYED TO EXPEDITION!",
+			Vector3.new(20, 5.5, -2),
+			COLORS.Cyan,
+			Color3.fromRGB(20, 40, 60),
+			1.4
+		)
+	elseif action == "SelectCombatAction" then
+		spawnShockwave(self._root, Vector3.new(20, 1.0, -4), COLORS.Cyan, 5, 0.6)
+		spawnFloatingBanner(
+			self._root,
+			"⚔️ TURN EXECUTED!",
+			Vector3.new(20, 3.5, -4),
+			COLORS.Cyan,
+			Color3.fromRGB(15, 35, 50),
+			1.0
+		)
+	elseif action == "SecureLoot" then
+		spawnShockwave(self._root, Vector3.new(20, 1.0, -2), COLORS.Lime, 7, 0.8)
+		spawnFloatingBanner(
+			self._root,
+			"💎 LOOT SECURED!",
+			Vector3.new(20, 4.0, -2),
+			COLORS.Lime,
+			Color3.fromRGB(20, 45, 20),
+			1.2
+		)
+	elseif action == "ProceedNextRoom" then
+		spawnShockwave(self._root, Vector3.new(20, 3.2, -2), COLORS.Purple, 8, 1.0)
+		spawnFloatingBanner(
+			self._root,
+			"🚪 ADVANCING ROOM...",
+			Vector3.new(20, 5.0, -2),
+			COLORS.Purple,
+			Color3.fromRGB(30, 15, 50),
+			1.2
+		)
+	elseif action == "Evacuate" then
+		spawnShockwave(self._root, Vector3.new(20, 3.2, -2), COLORS.Red, 8, 1.0)
+		spawnFloatingBanner(
+			self._root,
+			"🏃 SQUAD EVACUATED!",
+			Vector3.new(20, 5.0, -2),
+			COLORS.Red,
+			Color3.fromRGB(50, 15, 15),
+			1.2
+		)
+	end
 end
 
 function WorldController:SetState(snapshot)
@@ -1096,12 +1692,28 @@ function WorldController:SetState(snapshot)
 
 	self._knownMutants = snapshot.Mutants or {}
 
+	local expeditionMutantIds = {}
+	local inExpedition = false
+	if snapshot.Expedition then
+		inExpedition = snapshot.Expedition.Status == "InCombat"
+			or snapshot.Expedition.Status == "AtTerminal"
+			or snapshot.Expedition.Status == "Exploring"
+
+		if snapshot.Expedition.CurrentCombat and snapshot.Expedition.CurrentCombat.PlayerTeam.Active then
+			for _, u in snapshot.Expedition.CurrentCombat.PlayerTeam.Active do
+				if u.IsAlive ~= false and u.CurrentHp and u.CurrentHp > 0 then
+					expeditionMutantIds[u.Id] = u
+				end
+			end
+		end
+	end
+
 	self:_clear(self._display)
 	for index, mutant in snapshot.Mutants or {} do
 		if index <= 6 then
 			local padCFrame = CFrame.new(-13 + (index - 1) * 5.1, 0.5, 3)
 			local model
-			if mutant.Id == battlingMutantId then
+			if mutant.Id == battlingMutantId or expeditionMutantIds[mutant.Id] then
 				model = makeHologramPlaceholder(self._display, mutant, padCFrame, index)
 			else
 				model = makeBlob(self._display, mutant, padCFrame, index)
@@ -1133,6 +1745,22 @@ function WorldController:SetState(snapshot)
 	end
 	self:_updateSelectionHighlights()
 
+	if self._camera then
+		if inExpedition then
+			self._camera.CameraType = Enum.CameraType.Scriptable
+			self._camera.CFrame = CFrame.new(20, 4.5, 3.5) * CFrame.Angles(math.rad(-15), 0, 0)
+		else
+			self._camera.CameraType = Enum.CameraType.Custom
+			local char = Players.LocalPlayer.Character
+			if char then
+				local hum = char:FindFirstChildOfClass("Humanoid")
+				if hum then
+					self._camera.CameraSubject = hum
+				end
+			end
+		end
+	end
+
 	self._battle = snapshot.Battle
 	if not isSameBattle then
 		self._lastHitIndex = 0
@@ -1151,6 +1779,49 @@ function WorldController:SetState(snapshot)
 			end
 			if fighter then
 				makeBlob(self._battleFolder, fighter, CFrame.new(-6.5, 0.9, 8), 1)
+			end
+		end
+	end
+
+	-- Expedition 3D Combat Visualization
+	if self._expeditionFolder then
+		self:_clear(self._expeditionFolder)
+		if snapshot.Expedition and snapshot.Expedition.InCombat and snapshot.Expedition.CurrentCombat then
+			local combat = snapshot.Expedition.CurrentCombat
+
+			-- Render Enemies
+			local enemyTeam = combat.EnemyTeam
+			if enemyTeam and enemyTeam.Active then
+				local livingEnemies = {}
+				for _, enemy in enemyTeam.Active do
+					if (enemy.IsAlive ~= false) and enemy.CurrentHp and enemy.CurrentHp > 0 then
+						table.insert(livingEnemies, enemy)
+					end
+				end
+				local count = #livingEnemies
+				for i, enemy in livingEnemies do
+					local offsetX = (i - (count + 1) / 2) * 3.8
+					local at = CFrame.new(20 + offsetX, 1.0, -6) * CFrame.Angles(0, math.pi, 0)
+					makeEnemyUnit(self._expeditionFolder, enemy, at, i)
+				end
+			end
+
+			-- Render Player Squad
+			local playerTeam = combat.PlayerTeam
+			if playerTeam and playerTeam.Active then
+				local livingPlayers = {}
+				for _, p in playerTeam.Active do
+					if p.IsAlive ~= false and p.CurrentHp and p.CurrentHp > 0 then
+						table.insert(livingPlayers, p)
+					end
+				end
+				local pCount = #livingPlayers
+				for i, p in livingPlayers do
+					local offsetX = (i - (pCount + 1) / 2) * 3.8
+					-- Place player blobs closer to camera (Z = -0.5), facing enemies (front is -Z so rotation is 0)
+					local at = CFrame.new(20 + offsetX, 0.4, -0.5)
+					makeBlob(self._expeditionFolder, p, at, i)
+				end
 			end
 		end
 	end

@@ -95,6 +95,13 @@ function PlayerDataService:_validate(profile: any): boolean
 	return self.GameState.validateProfile(profile, self.GameConfig, self.MutantConfig) == true
 end
 
+function PlayerDataService:_migrate(profile: any): any
+	if type(self.GameState.migrateProfile) == "function" then
+		return self.GameState.migrateProfile(profile, self.GameConfig, self.MutantConfig)
+	end
+	return profile
+end
+
 function PlayerDataService:_key(player: Player): string
 	return PersistenceConfig.KeyPrefix .. tostring(player.UserId)
 end
@@ -201,6 +208,9 @@ function PlayerDataService:Load(player: Player): (any?, string)
 			defaultProfile,
 			function(profile: any): boolean
 				return self:_validate(profile)
+			end,
+			function(profile: any): any
+				return self:_migrate(profile)
 			end
 		)
 	end)
@@ -287,6 +297,9 @@ function PlayerDataService:_saveState(
 			release,
 			function(candidate: any): boolean
 				return self:_validate(candidate)
+			end,
+			function(candidate: any): any
+				return self:_migrate(candidate)
 			end
 		)
 	end)

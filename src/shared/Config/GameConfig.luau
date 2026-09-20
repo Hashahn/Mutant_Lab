@@ -1,6 +1,6 @@
 --!strict
 return table.freeze({
-	DataVersion = 1,
+	DataVersion = 2,
 	StartingBioCoins = 100,
 	BlobPrice = 50,
 	StartingSlots = 6,

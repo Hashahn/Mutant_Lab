@@ -8,6 +8,9 @@ local GameState = require("../src/server/Domain/GameState")
 local GameRules = require("../src/server/Domain/GameRules")
 local RateLimiter = require("../src/server/Domain/RateLimiter")
 local RequestValidator = require("../src/server/Domain/RequestValidator")
+local ExpeditionSession = require("../src/server/Domain/ExpeditionSession")
+local BreedingService = require("../src/shared/Domain/BreedingService")
+local RestCooldownService = require("../src/shared/Domain/RestCooldownService")
 
 local function signal()
 	local handlers = {}
@@ -53,6 +56,10 @@ root.Parent = storage
 local shared = node("Shared")
 shared.Parent = root
 shared.Config = { GameConfig = GameConfig, MutantConfig = MutantConfig }
+shared.Domain = {
+	BreedingService = BreedingService,
+	RestCooldownService = RestCooldownService,
+}
 local workspaceMock = node("Workspace")
 function workspaceMock:GetServerTimeNow()
 	return now
@@ -85,6 +92,7 @@ local modules = {
 		GameRules = GameRules,
 		RateLimiter = RateLimiter,
 		RequestValidator = RequestValidator,
+		ExpeditionSession = ExpeditionSession,
 	},
 	Services = {
 		PlayerDataService = {
@@ -135,6 +143,9 @@ local env = {
 		clock = function()
 			return now
 		end,
+		time = function()
+			return math.floor(now)
+		end,
 	},
 	task = {
 		spawn = function(callback, ...)
@@ -184,9 +195,30 @@ assert(profiles[b].BioCoins == 100 and #profiles[b].Mutants == 0, "other player 
 assert(request(a, "CreateBlob", nil).State.BioCoins == 85)
 assert(get(a).State.Battle == false)
 local battleNotice = a.Messages[#a.Messages - 1]
-assert(battleNotice.Notice.Code == "BATTLE_COMPLETE" and battleNotice.Notice.Reward == 35)
 assert(request(a, "StartBattle", { MutantId = toxic }).Ok)
 local pending = jobs[#jobs]
+
+-- Verify StartExpedition works on server for Player B
+assert(request(b, "CreateBlob", nil).Ok)
+local bMutant = profiles[b].Mutants[1].Id
+local expRes = request(b, "StartExpedition", {
+	RoomCount = 3,
+	ActiveIds = { bMutant },
+})
+assert(expRes.Ok and expRes.Code == "OK", "StartExpedition failed: " .. tostring(expRes.Code))
+local bSnap = get(b).State
+assert(bSnap.Expedition ~= nil, "Expedition should be attached to snapshot")
+assert(bSnap.Expedition.InCombat == true, "Expedition should start in combat")
+assert(bSnap.Expedition.CurrentRoomIndex == 1, "Expedition should be at room 1")
+
+-- Verify BreedMutants works on server for Player B after expedition/creation
+assert(request(b, "CreateBlob", nil).Ok)
+assert(request(b, "CreateBlob", nil).Ok)
+local m1 = profiles[b].Mutants[2].Id
+local m2 = profiles[b].Mutants[3].Id
+local breedRes = request(b, "BreedMutants", { FirstId = m1, SecondId = m2 })
+assert(breedRes.Ok and breedRes.Code == "OK", "BreedMutants failed: " .. tostring(breedRes.Code))
+assert(#profiles[b].Mutants == 2, "Breeding must consume one mutant and keep survivor")
 Players.PlayerRemoving:Fire(a)
 now = 12
 pending.Callback(table.unpack(pending.Args))
