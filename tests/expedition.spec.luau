@@ -65,8 +65,11 @@ assert(session.SecuredLoot.BioCoins == 0)
 assert(session.CurrentCombat ~= nil)
 local currentActorId = session.CurrentCombat.CurrentTurnUnitId
 
--- Force hero turn to defeat enemy immediately
+---- Force hero turn to defeat enemy immediately
 session.CurrentCombat.CurrentTurnUnitId = "hero_1"
+for _, hero in session.CurrentCombat.PlayerTeam.Active do
+	hero.StunTurns = 0
+end
 -- Lower enemy HP to 1
 for _, enemy in session.CurrentCombat.EnemyTeam.Active do
 	enemy.CurrentHp = 1
@@ -98,17 +101,24 @@ do
 			break
 		end
 	end
-	if not livingEnemy then
-		break
+	local attacker = nil
+	for _, hero in session.CurrentCombat.PlayerTeam.Active do
+		if hero.IsAlive and hero.CurrentHp > 0 then
+			attacker = hero
+			break
+		end
 	end
-	session.CurrentCombat.CurrentTurnUnitId = "hero_1"
+	assert(attacker, "Should have a living hero")
+	session.CurrentCombat.CurrentTurnUnitId = attacker.Id
+	attacker.StunTurns = 0
+	attacker.CurrentHp = attacker.MaxHp
 	livingEnemy.CurrentHp = 1
-	local sOk = session:StepCombatAction({
-		ActorId = "hero_1",
+	local sOk, sErr = session:StepCombatAction({
+		ActorId = attacker.Id,
 		AbilityType = "Basic",
 		TargetId = livingEnemy.Id,
 	})
-	assert(sOk)
+	assert(sOk, "Hero attack must succeed: " .. tostring(sErr))
 end
 
 -- Room 2 has a terminal, so status should now be AtTerminal!
@@ -129,35 +139,47 @@ assert(evacOk and claimedLoot ~= nil, "Evacuation must succeed: " .. tostring(ev
 assert(session.Status == "Completed", "Session must be Completed after evacuation")
 assert(claimedLoot.BioCoins == pendingBeforeSecure)
 
--- 3. Test Defeat Scenario (Pending loot lost, Secured loot preserved)
+-- Re-evacuation must be rejected when Completed
+local reEvacOk, _, reEvacErr = session:Evacuate()
+assert(not reEvacOk, "Re-evacuation when Completed must be disallowed")
+assert(reEvacErr == "CANNOT_EVACUATE")
+
+-- TakeUncreditedLoot test
+local uncredited = session:TakeUncreditedLoot()
+assert(uncredited.BioCoins == pendingBeforeSecure, "First TakeUncreditedLoot must return full secured loot")
+local emptyUncredited = session:TakeUncreditedLoot()
+assert(emptyUncredited.BioCoins == 0, "Second TakeUncreditedLoot must return 0 delta")
+
+-- 3. Test Defeat Scenario (Pending loot lost, Secured loot preserved, anti-skip)
 local sessionFail = ExpeditionSession.new("exp_test_fail", testSquad, 3)
 sessionFail.PendingLoot.BioCoins = 75
 sessionFail.SecuredLoot.BioCoins = 120
 
--- Simulate defeat
+-- In combat: ProceedToNextRoom must be rejected
+assert(sessionFail.Status == "InCombat", "Session must be InCombat")
+local cannotSkipOk, cannotSkipErr = sessionFail:ProceedToNextRoom()
+assert(not cannotSkipOk, "Cannot skip combat via ProceedToNextRoom")
+assert(cannotSkipErr == "CANNOT_PROCEED")
+
+-- Simulate natural defeat through StepCombatAction
 assert(sessionFail.CurrentCombat ~= nil)
--- Set all player units to 1 HP and no reserve
-sessionFail.CurrentCombat.PlayerTeam.Active[1].CurrentHp = 1
+sessionFail.CurrentCombat.PlayerTeam.Active[1].CurrentHp = 0
+sessionFail.CurrentCombat.PlayerTeam.Active[1].IsAlive = false
 sessionFail.CurrentCombat.PlayerTeam.Active[2].CurrentHp = 1
 sessionFail.CurrentCombat.PlayerTeam.Reserve = {}
 
--- Enemy attacks fatally
 local enemyUnit = sessionFail.CurrentCombat.EnemyTeam.Active[1]
 sessionFail.CurrentCombat.CurrentTurnUnitId = enemyUnit.Id
-sessionFail.CurrentCombat.PlayerTeam.Active[1].CurrentHp = 0
-sessionFail.CurrentCombat.PlayerTeam.Active[1].IsAlive = false
-
-session:StepCombatAction({
+local failStepOk, failStepErr = sessionFail:StepCombatAction({
 	ActorId = enemyUnit.Id,
 	AbilityType = "Basic",
 	TargetId = sessionFail.CurrentCombat.PlayerTeam.Active[2].Id,
 })
+assert(failStepOk, "Fatal enemy turn must succeed: " .. tostring(failStepErr))
 
--- Test wipe directly on session
-sessionFail.CurrentCombat.Status = "Defeat"
-sessionFail.Status = "Failed"
-sessionFail.PendingLoot = { BioCoins = 0, DnaFragments = 0, Items = {} }
-
+-- Naturally transitioned to Defeat and Failed status
+assert(sessionFail.CurrentCombat.Status == "Defeat", "Combat must end in Defeat")
+assert(sessionFail.Status == "Failed", "Session status must naturally transition to Failed")
 assert(sessionFail.PendingLoot.BioCoins == 0, "Pending loot must be wiped on failure")
 assert(sessionFail.SecuredLoot.BioCoins == 120, "Secured loot must remain intact on failure")
 
@@ -167,6 +189,15 @@ assert(RequestValidator.isValid("StartExpedition", {
 	ActiveIds = { "m1", "m2" },
 	ReserveIds = { "m3" },
 }))
+assert(not RequestValidator.isValid("StartExpedition", {
+	RoomCount = 3,
+	ActiveIds = { "m1", "m1" },
+}), "Duplicate ActiveIds must be rejected")
+assert(not RequestValidator.isValid("StartExpedition", {
+	RoomCount = 3,
+	ActiveIds = { "m1" },
+	ReserveIds = { "m1" },
+}), "Overlap between ActiveIds and ReserveIds must be rejected")
 assert(RequestValidator.isValid("StartExpedition", {
 	RoomCount = 5,
 	ActiveIds = { "m1" },

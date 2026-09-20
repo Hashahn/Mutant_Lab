@@ -49,6 +49,7 @@ export type ExpeditionSessionInstance = {
 	SecureLoot: (self: any) -> (boolean, string?),
 	ProceedToNextRoom: (self: any) -> (boolean, string?),
 	Evacuate: (self: any) -> (boolean, LootBundle?, string?),
+	TakeUncreditedLoot: (self: any) -> LootBundle,
 	GetSnapshot: (self: any) -> ExpeditionSnapshot,
 }
 
@@ -175,6 +176,7 @@ function ExpeditionSession.new(
 	self.PlayerSquad = playerSquad
 	self.PendingLoot = { BioCoins = 0, DnaFragments = 0, Items = {} }
 	self.SecuredLoot = { BioCoins = 0, DnaFragments = 0, Items = {} }
+	self._creditedLoot = { BioCoins = 0, DnaFragments = 0, ItemsCount = 0 }
 	self.Status = "InCombat"
 	self.Rng = rng
 
@@ -188,6 +190,27 @@ function ExpeditionSession.new(
 	return (self :: any) :: ExpeditionSessionInstance
 end
 
+local function advanceRoom(self: any): (boolean, string?)
+	if self.CurrentRoomIndex >= self.TotalRooms then
+		self.Status = "Completed"
+		return true, nil
+	end
+
+	self.CurrentRoomIndex += 1
+	local nextRoom = self.Rooms[self.CurrentRoomIndex]
+
+	if nextRoom.EnemySquad then
+		self.CurrentCombat = CombatEngine.Init(self.PlayerSquad, nextRoom.EnemySquad, { Rng = self.Rng })
+		self.Status = "InCombat"
+		processEnemyTurns(self)
+	else
+		self.CurrentCombat = nil
+		self.Status = if nextRoom.HasTerminal then "AtTerminal" else "Exploring"
+	end
+
+	return true, nil
+end
+
 function ExpeditionSession:_handleVictory()
 	if not self.CurrentCombat then
 		return
@@ -199,11 +222,7 @@ function ExpeditionSession:_handleVictory()
 	if currentRoom.HasTerminal then
 		self.Status = "AtTerminal"
 	else
-		if self.CurrentRoomIndex < self.TotalRooms then
-			self:ProceedToNextRoom()
-		else
-			self.Status = "Completed"
-		end
+		advanceRoom(self)
 	end
 end
 
@@ -241,8 +260,10 @@ function ExpeditionSession:StepCombatAction(action: CombatAction): (boolean, str
 
 	if self.CurrentCombat.Status == "Victory" then
 		self:_handleVictory()
+		return true, nil
 	elseif self.CurrentCombat.Status == "Defeat" then
 		self:_handleDefeat()
+		return true, nil
 	end
 
 	return true, nil
@@ -259,32 +280,15 @@ function ExpeditionSession:SecureLoot(): (boolean, string?)
 end
 
 function ExpeditionSession:ProceedToNextRoom(): (boolean, string?)
-	if self.Status ~= "AtTerminal" and self.Status ~= "InCombat" then
+	if self.Status ~= "AtTerminal" then
 		return false, "CANNOT_PROCEED"
 	end
 
-	if self.CurrentRoomIndex >= self.TotalRooms then
-		self.Status = "Completed"
-		return true, nil
-	end
-
-	self.CurrentRoomIndex += 1
-	local nextRoom = self.Rooms[self.CurrentRoomIndex]
-
-	if nextRoom.EnemySquad then
-		self.CurrentCombat = CombatEngine.Init(self.PlayerSquad, nextRoom.EnemySquad, { Rng = self.Rng })
-		self.Status = "InCombat"
-		processEnemyTurns(self)
-	else
-		self.CurrentCombat = nil
-		self.Status = if nextRoom.HasTerminal then "AtTerminal" else "Exploring"
-	end
-
-	return true, nil
+	return advanceRoom(self)
 end
 
 function ExpeditionSession:Evacuate(): (boolean, LootBundle?, string?)
-	if self.Status ~= "AtTerminal" and self.Status ~= "Completed" then
+	if self.Status ~= "AtTerminal" then
 		return false, nil, "CANNOT_EVACUATE"
 	end
 
@@ -294,6 +298,21 @@ function ExpeditionSession:Evacuate(): (boolean, LootBundle?, string?)
 	self.Status = "Completed"
 
 	return true, self.SecuredLoot, nil
+end
+
+function ExpeditionSession:TakeUncreditedLoot(): LootBundle
+	local uncredited: LootBundle = {
+		BioCoins = math.max(0, self.SecuredLoot.BioCoins - self._creditedLoot.BioCoins),
+		DnaFragments = math.max(0, self.SecuredLoot.DnaFragments - self._creditedLoot.DnaFragments),
+		Items = {},
+	}
+	for i = self._creditedLoot.ItemsCount + 1, #self.SecuredLoot.Items do
+		table.insert(uncredited.Items, self.SecuredLoot.Items[i])
+	end
+	self._creditedLoot.BioCoins = self.SecuredLoot.BioCoins
+	self._creditedLoot.DnaFragments = self.SecuredLoot.DnaFragments
+	self._creditedLoot.ItemsCount = #self.SecuredLoot.Items
+	return uncredited
 end
 
 function ExpeditionSession:GetSnapshot(): ExpeditionSnapshot

@@ -12,6 +12,7 @@ local WorldController = require(script.Parent.Controllers.WorldController)
 
 local world = WorldController.new()
 world:Start()
+_G.MutantLabWorld = world
 
 local remotes = root:WaitForChild("Remotes")
 local network
@@ -30,6 +31,12 @@ ui = UIController.new({
 	end,
 	OnSelectionChanged = function(selectedIds)
 		world:SetSelected(selectedIds)
+	end,
+	OnCombatTargetSelected = function(targetId)
+		world:SetCombatTarget(targetId)
+	end,
+	OnResetCombatCamera = function()
+		world:ResetCombatCamera()
 	end,
 }, GameConfig)
 

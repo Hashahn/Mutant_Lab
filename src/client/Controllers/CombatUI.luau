@@ -67,7 +67,7 @@ function CombatUI.new(parentGui, callbacks)
 
 	local roomTitle = Instance.new("TextLabel")
 	roomTitle.Name = "RoomTitle"
-	roomTitle.Size = UDim2.new(1, -20, 0, 24)
+	roomTitle.Size = UDim2.new(1, -290, 0, 24)
 	roomTitle.Position = UDim2.new(0, 10, 0, 6)
 	roomTitle.BackgroundTransparency = 1
 	roomTitle.Font = Enum.Font.GothamBold
@@ -77,6 +77,26 @@ function CombatUI.new(parentGui, callbacks)
 	roomTitle.Text = "EXPEDITION ACTIVE"
 	roomTitle.Parent = topBar
 	self.RoomTitle = roomTitle
+
+	-- Orbital Camera Hint & Reset Badge
+	local camHint = Instance.new("TextButton")
+	camHint.Name = "CameraControlBadge"
+	camHint.Size = UDim2.new(0, 260, 0, 22)
+	camHint.Position = UDim2.new(1, -270, 0, 7)
+	camHint.BackgroundColor3 = COLORS.PanelSoft
+	camHint.BackgroundTransparency = 0.4
+	camHint.Font = Enum.Font.GothamMedium
+	camHint.TextSize = 11
+	camHint.TextColor3 = COLORS.Muted
+	camHint.Text = "🖱️ RMB Orbit • 📜 Zoom • [R] Reset"
+	camHint.Parent = topBar
+	addCorner(camHint, 5)
+
+	camHint.MouseButton1Click:Connect(function()
+		if self.Callbacks.OnResetCamera then
+			self.Callbacks.OnResetCamera()
+		end
+	end)
 
 	-- Timeline List
 	local timeline = Instance.new("ScrollingFrame")
@@ -507,30 +527,18 @@ function CombatUI:UpdateCombat(combatState, expeditionSnapshot)
 	end
 
 	-- Ensure a valid living target is selected
-	local targetStillAlive = false
-	for _, enemy in combatState.EnemyTeam.Active do
-		if enemy.IsAlive and enemy.CurrentHp > 0 and enemy.Id == self.SelectedTargetId then
-			targetStillAlive = true
-			break
-		end
-	end
-	if not targetStillAlive then
-		self.SelectedTargetId = nil
-		for _, enemy in combatState.EnemyTeam.Active do
-			if enemy.IsAlive and enemy.CurrentHp > 0 then
-				self.SelectedTargetId = enemy.Id
-				break
-			end
-		end
-	end
 	if not self.SelectedAbilityType then
 		self.SelectedAbilityType = "Basic"
 	end
 
 	local isPlayerTurn = activeUnit ~= nil
+	local selectedAbility: CombatTypes.Ability? = nil
 
 	if activeUnit and isPlayerTurn then
 		for _, ability in activeUnit.Abilities do
+			if ability.Type == self.SelectedAbilityType then
+				selectedAbility = ability
+			end
 			local canAfford = playerEnergy >= ability.EnergyCost
 			local onCd = (activeUnit.Cooldowns[ability.Name] or 0) > 0
 
@@ -561,6 +569,32 @@ function CombatUI:UpdateCombat(combatState, expeditionSnapshot)
 		end
 	end
 
+	local isAllyTarget = selectedAbility ~= nil and selectedAbility.TargetType == "SingleAlly"
+	local candidateTargets = if isAllyTarget
+		then combatState.PlayerTeam.Active
+		else combatState.EnemyTeam.Active
+
+	local targetStillAlive = false
+	for _, unit in candidateTargets do
+		if unit.IsAlive and unit.CurrentHp > 0 and unit.Id == self.SelectedTargetId then
+			targetStillAlive = true
+			break
+		end
+	end
+	if not targetStillAlive then
+		self.SelectedTargetId = nil
+		for _, unit in candidateTargets do
+			if unit.IsAlive and unit.CurrentHp > 0 then
+				self.SelectedTargetId = unit.Id
+				break
+			end
+		end
+	end
+
+	if self.Callbacks and self.Callbacks.OnTargetSelected and self.SelectedTargetId then
+		self.Callbacks.OnTargetSelected(self.SelectedTargetId)
+	end
+
 	-- Update Targets
 	for _, child in self.TargetsFrame:GetChildren() do
 		if child:IsA("Frame") then
@@ -568,16 +602,16 @@ function CombatUI:UpdateCombat(combatState, expeditionSnapshot)
 		end
 	end
 
-	for _, enemy in combatState.EnemyTeam.Active do
-		if enemy.IsAlive and enemy.CurrentHp > 0 then
+	for _, targetUnit in candidateTargets do
+		if targetUnit.IsAlive and targetUnit.CurrentHp > 0 then
 			local card = Instance.new("Frame")
 			card.Size = UDim2.new(0, 140, 0, 88)
 			card.BackgroundColor3 = COLORS.Card
 			card.Parent = self.TargetsFrame
 			addCorner(card, 8)
 
-			if self.SelectedTargetId == enemy.Id then
-				addStroke(card, COLORS.Cyan, 2)
+			if self.SelectedTargetId == targetUnit.Id then
+				addStroke(card, if isAllyTarget then COLORS.Lime else COLORS.Cyan, 2)
 			end
 
 			local nameLbl = Instance.new("TextLabel")
@@ -585,8 +619,8 @@ function CombatUI:UpdateCombat(combatState, expeditionSnapshot)
 			nameLbl.BackgroundTransparency = 1
 			nameLbl.Font = Enum.Font.GothamBold
 			nameLbl.TextSize = 12
-			nameLbl.TextColor3 = COLORS.Red
-			nameLbl.Text = enemy.Name
+			nameLbl.TextColor3 = if isAllyTarget then COLORS.Lime else COLORS.Red
+			nameLbl.Text = targetUnit.Name
 			nameLbl.Parent = card
 
 			local hpLbl = Instance.new("TextLabel")
@@ -596,7 +630,7 @@ function CombatUI:UpdateCombat(combatState, expeditionSnapshot)
 			hpLbl.Font = Enum.Font.Gotham
 			hpLbl.TextSize = 10
 			hpLbl.TextColor3 = COLORS.Muted
-			hpLbl.Text = string.format("HP: %d/%d", enemy.CurrentHp, enemy.MaxHp)
+			hpLbl.Text = string.format("HP: %d/%d", targetUnit.CurrentHp, targetUnit.MaxHp)
 			hpLbl.Parent = card
 
 			local hpBg = Instance.new("Frame")
@@ -606,7 +640,7 @@ function CombatUI:UpdateCombat(combatState, expeditionSnapshot)
 			hpBg.Parent = card
 			addCorner(hpBg, 2)
 
-			local hpPct = math.clamp(enemy.CurrentHp / math.max(1, enemy.MaxHp), 0, 1)
+			local hpPct = math.clamp(targetUnit.CurrentHp / math.max(1, targetUnit.MaxHp), 0, 1)
 			local hpFill = Instance.new("Frame")
 			hpFill.Size = UDim2.new(hpPct, 0, 1, 0)
 			hpFill.BackgroundColor3 = if hpPct > 0.5
@@ -616,32 +650,38 @@ function CombatUI:UpdateCombat(combatState, expeditionSnapshot)
 			hpFill.Parent = hpBg
 			addCorner(hpFill, 2)
 
-			-- Calculate Matchup indicator if an active player unit is ready
+			-- Calculate Matchup indicator or Heal indicator if an active player unit is ready
 			if activeUnit then
-				local playerElem = activeUnit.Stats.EffectiveElements.Primary
-				local enemyElem = enemy.Stats.EffectiveElements.Primary
-				local mult = ElementMatrix.GetMultiplier(
-					playerElem,
-					enemyElem,
-					activeUnit.HasVoidCore,
-					enemy.HasVoidCore
-				)
-
 				local multLbl = Instance.new("TextLabel")
 				multLbl.Size = UDim2.new(1, 0, 0, 18)
 				multLbl.Position = UDim2.new(0, 0, 0, 48)
 				multLbl.BackgroundTransparency = 1
 				multLbl.Font = Enum.Font.GothamBold
 				multLbl.TextSize = 11
-				if mult > 1.0 then
-					multLbl.TextColor3 = COLORS.Red
-					multLbl.Text = string.format("⚔ %.1fx WEAK", mult)
-				elseif mult < 1.0 then
-					multLbl.TextColor3 = COLORS.Cyan
-					multLbl.Text = string.format("🛡 %.2fx RESIST", mult)
+
+				if isAllyTarget then
+					multLbl.TextColor3 = COLORS.Lime
+					multLbl.Text = "💚 ALLY HEAL"
 				else
-					multLbl.TextColor3 = COLORS.Muted
-					multLbl.Text = "⚖ 1.0x NEUTRAL"
+					local attackElem = (selectedAbility and selectedAbility.Element)
+						or activeUnit.Stats.EffectiveElements.Primary
+					local mult = ElementMatrix.GetCompositeMultiplier(
+						attackElem,
+						targetUnit.Stats.EffectiveElements,
+						activeUnit.HasVoidCore,
+						targetUnit.HasVoidCore
+					)
+
+					if mult > 1.0 then
+						multLbl.TextColor3 = COLORS.Red
+						multLbl.Text = string.format("⚔ %.1fx WEAK", mult)
+					elseif mult < 1.0 then
+						multLbl.TextColor3 = COLORS.Cyan
+						multLbl.Text = string.format("🛡 %.2fx RESIST", mult)
+					else
+						multLbl.TextColor3 = COLORS.Muted
+						multLbl.Text = "⚖ 1.0x NEUTRAL"
+					end
 				end
 				multLbl.Parent = card
 			end
@@ -652,7 +692,7 @@ function CombatUI:UpdateCombat(combatState, expeditionSnapshot)
 			selectBtn.Text = ""
 			selectBtn.Parent = card
 			selectBtn.MouseButton1Click:Connect(function()
-				self.SelectedTargetId = enemy.Id
+				self.SelectedTargetId = targetUnit.Id
 				self:UpdateCombat(combatState, expeditionSnapshot)
 			end)
 		end

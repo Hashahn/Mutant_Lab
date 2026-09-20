@@ -105,6 +105,45 @@ function ElementMatrix.GetMultiplier(
 	return 1.0
 end
 
+function ElementMatrix.GetCompositeMultiplier(
+	attackerElement: Element,
+	defenderElements: {
+		Primary: Element,
+		Secondary: Element?,
+		Tertiary: Element?,
+		TertiaryWeight: number?,
+	},
+	attackerVoidCore: boolean?,
+	defenderVoidCore: boolean?
+): number
+	assert(
+		ElementMatrix.IsValidElement(attackerElement),
+		"Invalid attacker element: " .. tostring(attackerElement)
+	)
+
+	if attackerVoidCore or defenderVoidCore then
+		return 1.0
+	end
+
+	local totalMult = ElementMatrix.GetMultiplier(attackerElement, defenderElements.Primary) * 1.0
+	local totalWeight = 1.0
+
+	if defenderElements.Secondary and ElementMatrix.IsValidElement(defenderElements.Secondary) then
+		totalMult += ElementMatrix.GetMultiplier(attackerElement, defenderElements.Secondary) * 1.0
+		totalWeight += 1.0
+	end
+
+	if defenderElements.Tertiary and ElementMatrix.IsValidElement(defenderElements.Tertiary) then
+		local w = defenderElements.TertiaryWeight or 0
+		if w > 0 then
+			totalMult += ElementMatrix.GetMultiplier(attackerElement, defenderElements.Tertiary) * w
+			totalWeight += w
+		end
+	end
+
+	return totalMult / totalWeight
+end
+
 function ElementMatrix.GetAllElements(): { Element }
 	return { "Plasma", "Cryo", "Electro", "Toxin", "Shadow", "Biomass" }
 end

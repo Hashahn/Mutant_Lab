@@ -27,7 +27,9 @@ local DEFAULT_PASSIVE_ENERGY = 2
 export type UnitInput = {
 	Id: string,
 	Name: string,
+	Type: string?,
 	Tier: number,
+	Level: number?,
 	Role: CombatRole,
 	Genes: { CombatTypes.Gene },
 	HasVoidCore: boolean?,
@@ -47,7 +49,9 @@ function CombatEngine.CreateUnit(input: UnitInput): CombatUnit
 	return {
 		Id = input.Id,
 		Name = input.Name,
+		Type = input.Type or input.Name,
 		Tier = input.Tier,
+		Level = input.Level or 1,
 		Role = input.Role,
 		Genes = input.Genes,
 		Stats = stats,
@@ -57,6 +61,8 @@ function CombatEngine.CreateUnit(input: UnitInput): CombatUnit
 		HasVoidCore = input.HasVoidCore == true,
 		TauntTurns = 0,
 		GuardTurns = 0,
+		AttackBuffTurns = 0,
+		StunTurns = 0,
 		Cooldowns = {},
 		Abilities = abilities,
 	}
@@ -297,6 +303,12 @@ local function startNewRound(state: CombatState, options: EngineOptions?)
 			if unit.GuardTurns > 0 then
 				unit.GuardTurns -= 1
 			end
+			if (unit.AttackBuffTurns or 0) > 0 then
+				unit.AttackBuffTurns = (unit.AttackBuffTurns or 0) - 1
+			end
+			if (unit.StunTurns or 0) > 0 then
+				unit.StunTurns = (unit.StunTurns or 0) - 1
+			end
 			for abilityName, cd in unit.Cooldowns do
 				if cd > 0 then
 					unit.Cooldowns[abilityName] = cd - 1
@@ -313,6 +325,28 @@ local function startNewRound(state: CombatState, options: EngineOptions?)
 	state.InitiativeQueue = buildInitiativeQueue(state.PlayerTeam, state.EnemyTeam)
 	state.TurnIndex = 1
 	state.CurrentTurnUnitId = state.InitiativeQueue[1] or ""
+end
+
+local function advanceTurn(state: CombatState, options: EngineOptions?)
+	local nextTurnIndex = state.TurnIndex + 1
+	local foundNext = false
+
+	while nextTurnIndex <= #state.InitiativeQueue do
+		local nextId = state.InitiativeQueue[nextTurnIndex]
+		local nextUnit, _ = findUnit(state, nextId)
+		if nextUnit and nextUnit.IsAlive and nextUnit.CurrentHp > 0 then
+			state.TurnIndex = nextTurnIndex
+			state.CurrentTurnUnitId = nextId
+			foundNext = true
+			break
+		end
+		nextTurnIndex += 1
+	end
+
+	-- If all living units took their turn, advance to next round
+	if not foundNext then
+		startNewRound(state, options)
+	end
 end
 
 function CombatEngine.Step(
@@ -335,6 +369,22 @@ function CombatEngine.Step(
 
 	if actor.Id ~= state.CurrentTurnUnitId then
 		return false, "NOT_ACTORS_TURN"
+	end
+
+	-- If actor is stunned, skip turn and advance
+	if (actor.StunTurns or 0) > 0 then
+		actor.StunTurns = (actor.StunTurns or 0) - 1
+		local logEntry: CombatLogEntry = {
+			Round = state.Round,
+			ActorId = actor.Id,
+			ActionType = "Basic",
+			TargetId = nil,
+			Message = string.format("%s is stunned and skipped their turn!", actor.Name),
+		}
+		table.insert(state.Log, logEntry)
+		advanceTurn(state, options)
+		updateCombatStatus(state)
+		return true, nil
 	end
 
 	-- Find chosen ability
@@ -389,7 +439,7 @@ function CombatEngine.Step(
 			target = tauntingGuardian
 		elseif action.TargetId then
 			local t, tTeam = findUnit(state, action.TargetId)
-			if t and tTeam == opponentTeam and t.IsAlive then
+			if t and tTeam == opponentTeam and t.IsAlive and table.find(opponentTeam.Active, t) ~= nil then
 				target = t
 			end
 		end
@@ -406,7 +456,7 @@ function CombatEngine.Step(
 	elseif chosenAbility.TargetType == "SingleAlly" then
 		if action.TargetId then
 			local t, tTeam = findUnit(state, action.TargetId)
-			if t and tTeam == actorTeam and t.IsAlive then
+			if t and tTeam == actorTeam and t.IsAlive and table.find(actorTeam.Active, t) ~= nil then
 				target = t
 			end
 		end
@@ -425,17 +475,21 @@ function CombatEngine.Step(
 	then
 		assert(target ~= nil, "Target required for damage ability")
 		local attackElem: Element = chosenAbility.Element or actor.Stats.EffectiveElements.Primary
-		local defendElem: Element = target.Stats.EffectiveElements.Primary
 
-		local mult =
-			ElementMatrix.GetMultiplier(attackElem, defendElem, actor.HasVoidCore, target.HasVoidCore)
+		local mult = ElementMatrix.GetCompositeMultiplier(
+			attackElem,
+			target.Stats.EffectiveElements,
+			actor.HasVoidCore,
+			target.HasVoidCore
+		)
 
 		-- Check passive auto-guard
 		local guardRoll = rng()
 		local isGuarded = guardRoll < target.Stats.AutoGuardChance
 		local guardMult = if isGuarded then 0.5 else 1.0
 
-		local rawDmg = actor.Stats.Attack * chosenAbility.PowerMultiplier * mult * guardMult
+		local attackBuff = if (actor.AttackBuffTurns or 0) > 0 then 1.35 else 1.0
+		local rawDmg = actor.Stats.Attack * chosenAbility.PowerMultiplier * mult * guardMult * attackBuff
 		local finalDmg = math.max(1, math.floor(rawDmg))
 
 		target.CurrentHp = math.max(0, target.CurrentHp - finalDmg)
@@ -488,13 +542,21 @@ function CombatEngine.Step(
 		}
 		table.insert(state.Log, logEntry)
 	elseif chosenAbility.Type == "RoleSkill" and actor.Role == "Buffer" then
-		-- Team attack surge
+		-- Team attack surge (+35% ATK for 2 turns)
+		for _, ally in actorTeam.Active do
+			if ally.IsAlive then
+				ally.AttackBuffTurns = 2
+			end
+		end
 		local logEntry: CombatLogEntry = {
 			Round = state.Round,
 			ActorId = actor.Id,
 			ActionType = "RoleSkill",
 			TargetId = nil,
-			Message = string.format("%s activated Surge Boost for all allies!", actor.Name),
+			Message = string.format(
+				"%s activated Surge Boost (+35%% ATK, 2 turns) for all allies!",
+				actor.Name
+			),
 		}
 		table.insert(state.Log, logEntry)
 	elseif chosenAbility.Type == "RoleSkill" and actor.Role == "Controller" then
@@ -503,6 +565,8 @@ function CombatEngine.Step(
 		target.CurrentHp = math.max(0, target.CurrentHp - finalDmg)
 		if target.CurrentHp <= 0 then
 			target.IsAlive = false
+		else
+			target.StunTurns = 1
 		end
 
 		local logEntry: CombatLogEntry = {
@@ -512,7 +576,7 @@ function CombatEngine.Step(
 			TargetId = target.Id,
 			Damage = finalDmg,
 			Message = string.format(
-				"%s used Neural Disrupt on %s for %d damage!",
+				"%s used Neural Disrupt on %s for %d damage and STUNNED for 1 turn!",
 				actor.Name,
 				target.Name,
 				finalDmg
@@ -532,25 +596,7 @@ function CombatEngine.Step(
 	end
 
 	-- Advance turn in initiative queue
-	local nextTurnIndex = state.TurnIndex + 1
-	local foundNext = false
-
-	while nextTurnIndex <= #state.InitiativeQueue do
-		local nextId = state.InitiativeQueue[nextTurnIndex]
-		local nextUnit, _ = findUnit(state, nextId)
-		if nextUnit and nextUnit.IsAlive and nextUnit.CurrentHp > 0 then
-			state.TurnIndex = nextTurnIndex
-			state.CurrentTurnUnitId = nextId
-			foundNext = true
-			break
-		end
-		nextTurnIndex += 1
-	end
-
-	-- If all living units took their turn, advance to next round
-	if not foundNext then
-		startNewRound(state, options)
-	end
+	advanceTurn(state, options)
 
 	return true, nil
 end

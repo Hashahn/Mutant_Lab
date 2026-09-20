@@ -297,6 +297,148 @@ assert(
 	"Battle must result in Defeat when all units including reserve are dead"
 )
 
+-- 10. Composite Elemental Multipliers
+local ElementMatrix = require("../src/shared/Combat/ElementMatrix")
+local comp1 = ElementMatrix.GetCompositeMultiplier("Plasma", {
+	Primary = "Cryo",
+	Secondary = "Biomass",
+})
+assert(math.abs(comp1 - 1.25) < 0.001, "Plasma vs Cryo(1.5) + Biomass(1.0) must be 1.25 composite")
+
+local comp2 = ElementMatrix.GetCompositeMultiplier("Plasma", {
+	Primary = "Cryo",
+	Secondary = "Electro",
+	Tertiary = "Shadow",
+	TertiaryWeight = 1.0,
+})
+assert(
+	math.abs(comp2 - 1.0) < 0.001,
+	"Plasma vs Cryo(1.5) + Electro(0.75) + Shadow(0.75) with 1.0 weight must be 1.0 composite"
+)
+
+local compVoid = ElementMatrix.GetCompositeMultiplier("Plasma", {
+	Primary = "Cryo",
+	Secondary = "Biomass",
+}, true, false)
+assert(compVoid == 1.0, "VoidCore must neutralize composite multiplier to 1.0")
+
+-- 11. Target validation rejecting undeployed Reserve
+local reserveTargetCombat = CombatEngine.Init({
+	Active = {
+		{
+			Id = "p_act",
+			Name = "Active",
+			Tier = 2,
+			Role = "Striker",
+			Genes = { { Element = "Plasma", Value = 50 } },
+		},
+	},
+	Reserve = {
+		{
+			Id = "p_unborn",
+			Name = "InReserve",
+			Tier = 2,
+			Role = "Striker",
+			Genes = { { Element = "Cryo", Value = 50 } },
+		},
+	},
+}, {
+	Active = {
+		{
+			Id = "e_act",
+			Name = "EnemyActive",
+			Tier = 2,
+			Role = "Striker",
+			Genes = { { Element = "Electro", Value = 50 } },
+		},
+	},
+	Reserve = {
+		{
+			Id = "e_unborn",
+			Name = "EnemyInReserve",
+			Tier = 2,
+			Role = "Striker",
+			Genes = { { Element = "Toxin", Value = 50 } },
+		},
+	},
+})
+reserveTargetCombat.CurrentTurnUnitId = "p_act"
+-- Player attempts to target enemy reserve unit e_unborn
+local reserveAttackOk, _ = CombatEngine.Step(reserveTargetCombat, {
+	ActorId = "p_act",
+	AbilityType = "Basic",
+	TargetId = "e_unborn", -- in reserve, not active!
+})
+assert(reserveAttackOk, "Step should succeed with fallback to active enemy")
+local enemyReserveUnit = reserveTargetCombat.EnemyTeam.Reserve[1]
+assert(enemyReserveUnit.CurrentHp == enemyReserveUnit.MaxHp, "Enemy in reserve must NOT take damage")
+
+-- 12. Buffer and Controller role skills
+local roleCombat = CombatEngine.Init({
+	Active = {
+		{
+			Id = "buffer_unit",
+			Name = "Buffer",
+			Tier = 2,
+			Role = "Buffer",
+			Genes = { { Element = "Biomass", Value = 60 } },
+		},
+		{
+			Id = "controller_unit",
+			Name = "Controller",
+			Tier = 2,
+			Role = "Controller",
+			Genes = { { Element = "Cryo", Value = 60 } },
+		},
+	},
+}, {
+	Active = {
+		{
+			Id = "e_target",
+			Name = "Target",
+			Tier = 2,
+			Role = "Striker",
+			Genes = { { Element = "Plasma", Value = 60 } },
+		},
+	},
+})
+roleCombat.PlayerTeam.Energy = 10
+roleCombat.CurrentTurnUnitId = "buffer_unit"
+
+-- Buffer uses RoleSkill
+local bufOk = CombatEngine.Step(roleCombat, {
+	ActorId = "buffer_unit",
+	AbilityType = "RoleSkill",
+})
+assert(bufOk, "Buffer skill should succeed")
+assert(roleCombat.PlayerTeam.Active[1].AttackBuffTurns == 2, "Buffer should receive 2 turns buff")
+assert(roleCombat.PlayerTeam.Active[2].AttackBuffTurns == 2, "Controller ally should receive 2 turns buff")
+
+-- Controller uses RoleSkill on enemy
+roleCombat.CurrentTurnUnitId = "controller_unit"
+local ctrlOk = CombatEngine.Step(roleCombat, {
+	ActorId = "controller_unit",
+	AbilityType = "RoleSkill",
+	TargetId = "e_target",
+})
+assert(ctrlOk, "Controller skill should succeed")
+local enemyUnitTarget = roleCombat.EnemyTeam.Active[1]
+assert(enemyUnitTarget.StunTurns == 1, "Enemy should be stunned for 1 turn")
+
+-- Stunned enemy's turn is skipped
+roleCombat.CurrentTurnUnitId = "e_target"
+local stunnedTurnOk = CombatEngine.Step(roleCombat, {
+	ActorId = "e_target",
+	AbilityType = "Basic",
+	TargetId = "buffer_unit",
+})
+assert(stunnedTurnOk, "Stunned turn step should resolve")
+assert(enemyUnitTarget.StunTurns == 0, "Stun duration decremented")
+assert(
+	roleCombat.PlayerTeam.Active[1].CurrentHp == roleCombat.PlayerTeam.Active[1].MaxHp,
+	"Stunned enemy must not deal damage"
+)
+
 print(
 	"PASS combat-engine: stats, roles, abilities, turn queue, energy, taunt, guard, reserve, win/loss verified"
 )

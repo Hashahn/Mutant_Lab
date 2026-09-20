@@ -24,9 +24,21 @@ export type CalculatedStats = {
 	EffectiveElements: EffectiveElements,
 }
 
+export type UnitInput = {
+	Id: string,
+	Name: string,
+	Type: string?,
+	Tier: number,
+	Level: number?,
+	Role: CombatRole,
+	Genes: { Gene },
+	HasVoidCore: boolean?,
+}
+
 export type AbilityType = "Basic" | "RoleSkill" | "Ultimate"
 
 export type Ability = {
+	Id: string,
 	Name: string,
 	Type: AbilityType,
 	EnergyCost: number,
@@ -40,7 +52,9 @@ export type Ability = {
 export type CombatUnit = {
 	Id: string,
 	Name: string,
+	Type: string?,
 	Tier: number,
+	Level: number?,
 	Role: CombatRole,
 	Genes: { Gene },
 	Stats: CalculatedStats,
@@ -50,6 +64,8 @@ export type CombatUnit = {
 	HasVoidCore: boolean,
 	TauntTurns: number,
 	GuardTurns: number,
+	AttackBuffTurns: number?,
+	StunTurns: number?,
 	Cooldowns: { [string]: number },
 	Abilities: { Ability },
 }

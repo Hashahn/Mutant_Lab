@@ -2,6 +2,15 @@
 
 local GameState = {}
 
+local PROFILE_REQUIRED_KEYS = {
+	DataVersion = true,
+	BioCoins = true,
+	SlotsUnlocked = true,
+	Mutants = true,
+	Tutorial = true,
+	SecuredLoot = true,
+}
+
 local PROFILE_KEYS = {
 	DataVersion = true,
 	BioCoins = true,
@@ -9,6 +18,7 @@ local PROFILE_KEYS = {
 	Mutants = true,
 	Tutorial = true,
 	SecuredLoot = true,
+	BreedingConsumedUnits = true,
 }
 
 local MUTANT_KEYS = {
@@ -218,8 +228,23 @@ function GameState.newProfile(gameConfig: any): any
 end
 
 function GameState.validateProfile(profile: any, gameConfig: any, mutantConfig: any): boolean
-	if not hasExactKeys(profile, PROFILE_KEYS) then
+	if type(profile) ~= "table" then
 		return false
+	end
+	for key in pairs(profile) do
+		if not PROFILE_KEYS[key] then
+			return false
+		end
+	end
+	for key in pairs(PROFILE_REQUIRED_KEYS) do
+		if profile[key] == nil then
+			return false
+		end
+	end
+	if profile.BreedingConsumedUnits ~= nil then
+		if not isInteger(profile.BreedingConsumedUnits) or profile.BreedingConsumedUnits < 0 then
+			return false
+		end
 	end
 
 	-- Old data must be migrated before validation. Future data is rejected rather
@@ -400,13 +425,14 @@ function GameState.validateProfile(profile: any, gameConfig: any, mutantConfig: 
 	-- Merging preserves acquired tier-1 units: Blob counts as one and
 	-- ToxicBlob as two. Without a paid Blob, this must equal the persisted
 	-- free-create count. Paid profiles may shrink only after release unlocks.
-	if not tutorial.FirstBlobPurchased and acquisitionUnits ~= tutorial.FreeBlobsClaimed then
+	local totalAcquiredUnits = acquisitionUnits + (profile.BreedingConsumedUnits or 0)
+	if not tutorial.FirstBlobPurchased and totalAcquiredUnits ~= tutorial.FreeBlobsClaimed then
 		return false
 	end
 	if
 		tutorial.FirstBlobPurchased
 		and not tutorial.TutorialCompleted
-		and acquisitionUnits < tutorial.FreeBlobsClaimed + 1
+		and totalAcquiredUnits < tutorial.FreeBlobsClaimed + 1
 	then
 		return false
 	end

@@ -31,12 +31,15 @@ local COLORS = {
 }
 
 local SOUNDS = {
-	Click = "rbxassetid://6895079853",
-	Create = "rbxassetid://9114223170",
-	Merge = "rbxassetid://9065360699",
-	Battle = "rbxassetid://9114221580",
-	Victory = "rbxassetid://9065360699",
-	Error = "rbxassetid://9065360408",
+	Click = "rbxasset://sounds/button.wav",
+	Create = "rbxasset://sounds/electronicpingshort.wav",
+	Merge = "rbxasset://sounds/action_jump.mp3",
+	Battle = "rbxasset://sounds/impact_water.mp3",
+	Victory = "rbxasset://sounds/victory.wav",
+	Error = "rbxasset://sounds/bass.wav",
+	Hit = "rbxasset://sounds/action_falling_feather.mp3",
+	Crit = "rbxasset://sounds/snap.wav",
+	Heal = "rbxasset://sounds/electronicpingshort.wav",
 }
 
 local ERROR_TEXT = {
@@ -380,6 +383,16 @@ function UIController:_build()
 		OnNextRoom = function()
 			self:_playSound("Click")
 			self._callbacks.OnAction("ProceedNextRoom", nil)
+		end,
+		OnTargetSelected = function(targetId)
+			if self._callbacks and self._callbacks.OnCombatTargetSelected then
+				self._callbacks.OnCombatTargetSelected(targetId)
+			end
+		end,
+		OnResetCamera = function()
+			if self._callbacks and self._callbacks.OnResetCombatCamera then
+				self._callbacks.OnResetCombatCamera()
+			end
 		end,
 	})
 	self._combatUI = combatUI

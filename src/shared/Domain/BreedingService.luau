@@ -139,7 +139,7 @@ function BreedingService.Breed(
 
 		if existingGene then
 			-- Enhance existing gene
-			existingGene.Value += transferValue
+			existingGene.Value = math.clamp(existingGene.Value + transferValue, 1, 100)
 		else
 			-- New gene to be added
 			local maxSlots = BreedingService.GetMaxGeneSlots(survivorOriginal.Tier)

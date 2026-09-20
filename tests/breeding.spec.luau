@@ -156,4 +156,59 @@ assert(completedMutant.RestUntil == nil, "RestUntil must be cleared")
 assert(bonus ~= nil, "Bonus mutation should trigger with Rng = 0.0")
 assert(bonus.ValueAdded >= 5 and bonus.ValueAdded <= 15)
 
+-- 8. Gene Clamping at 100
+local nearCapMutant = {
+	Id = "near_cap",
+	Type = "Blob",
+	Tier = 1,
+	Level = 1,
+	Genes = { { Element = "Biomass", Value = 95 } },
+}
+local donorMutant = {
+	Id = "donor",
+	Type = "Blob",
+	Tier = 1,
+	Level = 1,
+	Genes = { { Element = "Biomass", Value = 50 } },
+}
+local capOk, capRes = BreedingService.Breed(nearCapMutant, donorMutant, {
+	Rng = function()
+		return 0.0
+	end, -- nearCapMutant survives, picks Biomass
+})
+assert(capOk and capRes ~= nil)
+assert(capRes.Survivor.Genes[1].Value == 100, "Gene value must be clamped to 100")
+
+-- RestCooldownService gene cap
+local capRestMutant = {
+	Id = "cap_rest",
+	Type = "Blob",
+	Tier = 1,
+	Level = 1,
+	Genes = { { Element = "Plasma", Value = 98 } },
+}
+local capRestCompleted, _ = RestCooldownService.CompleteRest(capRestMutant, now, function()
+	return 0.0
+end)
+assert(capRestCompleted.Genes[1].Value == 100, "Rest bonus gene value must be clamped to 100")
+
+-- 9. GameState Profile Validation after Breeding Free Blobs
+local GameState = require("../src/server/Domain/GameState")
+local GameConfig = require("../src/shared/Config/GameConfig")
+local MutantConfig = require("../src/shared/Config/MutantConfig")
+
+local bredProfile = GameState.newProfile(GameConfig)
+bredProfile.Tutorial.Started = true
+bredProfile.Tutorial.FirstBlobCreated = true
+bredProfile.Tutorial.FreeBlobsClaimed = 2
+-- Player claimed 2 free Blobs and bred them together, leaving 1 Blob and 1 BreedingConsumedUnits
+bredProfile.Mutants = {
+	{ Id = "survivor_blob", Type = "Blob", Tier = 1, Level = 1 },
+}
+bredProfile.BreedingConsumedUnits = 1
+assert(
+	GameState.validateProfile(bredProfile, GameConfig, MutantConfig) == true,
+	"Profile with BreedingConsumedUnits must validate successfully"
+)
+
 print("PASS breeding: survival odds, inheritance, displacement, tier invariants, and rest cooldowns verified")

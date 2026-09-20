@@ -3,6 +3,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local CombatPresentation = require(
 	ReplicatedStorage:WaitForChild("MutantLab")
@@ -28,6 +29,7 @@ local COLORS = {
 	PanelSoft = Color3.fromRGB(27, 37, 47),
 	Electric = Color3.fromRGB(255, 230, 70),
 	Cryo = Color3.fromRGB(110, 220, 255),
+	Muted = Color3.fromRGB(120, 140, 160),
 }
 
 local function addCorner(parent, radius)
@@ -263,8 +265,10 @@ local function makeBlob(parent, mutant, at, order)
 	model.Name = tostring(mutant.Id)
 	model:SetAttribute("MutantId", mutant.Id)
 	model:SetAttribute("Order", order or 1)
-	local isPlasma = mutant.Type == "PlasmaBlob"
-	local toxic = mutant.Type == "ToxicBlob"
+	local mType = mutant.Type or mutant.Name or "Blob"
+	local mTier = mutant.Tier or (if mType == "PlasmaBlob" then 3 elseif mType == "ToxicBlob" then 2 else 1)
+	local isPlasma = mType == "PlasmaBlob" or mTier == 3
+	local toxic = mType == "ToxicBlob" or mTier == 2
 	local bodyColor = if isPlasma
 		then Color3.fromRGB(150, 50, 255)
 		elseif toxic then COLORS.Toxic
@@ -335,7 +339,7 @@ local function makeBlob(parent, mutant, at, order)
 				Vector3.new(0.45, 1.6, 0.45),
 				nodeCFrame,
 				Color3.fromRGB(110, 230, 255),
-				Enum.Material.SmoothPlastic
+				Enum.Material.Neon
 			)
 			node.Shape = Enum.PartType.Cylinder
 		end
@@ -343,42 +347,208 @@ local function makeBlob(parent, mutant, at, order)
 			model,
 			"PlasmaHalo",
 			Vector3.new(3.2, 0.12, 3.2),
-			at * CFrame.new(0, 3.6, 0),
+			at * CFrame.new(0, 3.6, 0) * CFrame.Angles(0, 0, math.pi / 2),
 			Color3.fromRGB(120, 230, 255),
-			Enum.Material.SmoothPlastic
+			Enum.Material.Neon
 		)
 		halo.Shape = Enum.PartType.Cylinder
-		halo.CFrame = at * CFrame.new(0, 3.6, 0) * CFrame.Angles(0, 0, math.pi / 2)
 	end
 
-	local displayName = if isPlasma then "PLASMA BLOB" elseif toxic then "TOXIC BLOB" else "BLOB"
-	local labelColor = if isPlasma
-		then Color3.fromRGB(140, 220, 255)
+	-- Role visual accessories on player blobs
+	local role = mutant.Role or "Striker"
+	if role == "Striker" then
+		-- Dual sharp combat horns / crest
+		local hornColor = if isPlasma
+			then Color3.fromRGB(255, 90, 150)
+			elseif toxic then Color3.fromRGB(255, 170, 40)
+			else Color3.fromRGB(255, 60, 80)
+		for _, x in { -0.95, 0.95 } do
+			local horn = part(
+				model,
+				"StrikerHorn",
+				Vector3.new(0.35, 1.35, 0.35),
+				at
+					* CFrame.new(x, 1.5 + bodySize.Y * 0.4, -0.4)
+					* CFrame.Angles(-0.35, 0, (if x < 0 then 1 else -1) * 0.35),
+				hornColor,
+				Enum.Material.Neon
+			)
+			horn.Shape = Enum.PartType.Cylinder
+		end
+	elseif role == "Guardian" then
+		-- Heavy armored chest shield plate + glowing power core
+		local shieldZ = -bodySize.Z * 0.48 - 0.1
+		part(
+			model,
+			"GuardianShield",
+			Vector3.new(2.6, 1.4, 0.35),
+			at * CFrame.new(0, 1.35, shieldZ),
+			COLORS.Metal,
+			Enum.Material.DiamondPlate
+		)
+		local shieldCore = part(
+			model,
+			"GuardianShieldCore",
+			Vector3.new(0.65, 0.65, 0.42),
+			at * CFrame.new(0, 1.35, shieldZ - 0.05),
+			if isPlasma then Color3.fromRGB(130, 220, 255) elseif toxic then COLORS.Lime else COLORS.Cyan,
+			Enum.Material.Neon
+		)
+		shieldCore.Shape = Enum.PartType.Ball
+	elseif role == "Healer" then
+		-- Floating emerald healing cross overhead
+		local crossY = 1.5 + bodySize.Y * 0.5 + (if isPlasma then 0.9 else 0.65)
+		part(
+			model,
+			"HealerCrossH",
+			Vector3.new(1.1, 0.28, 0.22),
+			at * CFrame.new(0, crossY, -0.15),
+			Color3.fromRGB(60, 255, 140),
+			Enum.Material.Neon
+		)
+		part(
+			model,
+			"HealerCrossV",
+			Vector3.new(0.28, 1.1, 0.22),
+			at * CFrame.new(0, crossY, -0.15),
+			Color3.fromRGB(60, 255, 140),
+			Enum.Material.Neon
+		)
+	elseif role == "Buffer" then
+		-- Dual energy amplifier antennas with glowing booster spheres
+		for _, x in { -1.1, 1.1 } do
+			local antennaY = 1.5 + bodySize.Y * 0.42
+			local stem = part(
+				model,
+				"BufferStem",
+				Vector3.new(0.16, 1.0, 0.16),
+				at * CFrame.new(x, antennaY, 0) * CFrame.Angles(0, 0, (if x < 0 then 1 else -1) * 0.3),
+				COLORS.Ink,
+				Enum.Material.SmoothPlastic
+			)
+			stem.Shape = Enum.PartType.Cylinder
+			local orb = part(
+				model,
+				"BufferOrb",
+				Vector3.new(0.5, 0.5, 0.5),
+				at * CFrame.new(x * 1.25, antennaY + 0.6, 0),
+				Color3.fromRGB(255, 215, 50),
+				Enum.Material.Neon
+			)
+			orb.Shape = Enum.PartType.Ball
+		end
+	elseif role == "Controller" then
+		-- Psionic crown triad hovering above forehead
+		local crownY = 1.5 + bodySize.Y * 0.5 + 0.45
+		for idx = -1, 1 do
+			local node = part(
+				model,
+				"PsionicNode_" .. tostring(idx),
+				Vector3.new(0.42, 0.42, 0.42),
+				at * CFrame.new(idx * 0.85, crownY + math.abs(idx) * 0.18, -0.35),
+				Color3.fromRGB(255, 110, 230),
+				Enum.Material.Neon
+			)
+			node.Shape = Enum.PartType.Ball
+		end
+	end
+
+	-- Ground energy base ring
+	local baseRingColor = if isPlasma
+		then Color3.fromRGB(150, 80, 255)
 		elseif toxic then COLORS.Toxic
 		else COLORS.Cyan
-	labelOn(
-		body,
-		string.format("%s  •  Lv.%s", displayName, tostring(mutant.Level or 1)),
-		Vector3.new(0, if isPlasma then 4.1 else 2.6, 0),
-		labelColor
+	local baseRing = part(
+		model,
+		"BaseRing",
+		Vector3.new(0.08, bodySize.X + 0.6, bodySize.Z + 0.6),
+		at * CFrame.new(0, 0.08, 0) * CFrame.Angles(0, 0, math.pi / 2),
+		baseRingColor,
+		Enum.Material.Neon
 	)
+	baseRing.Shape = Enum.PartType.Cylinder
+
+	local displayName = if isPlasma then "PLASMA BLOB" elseif toxic then "TOXIC BLOB" else "BLOB"
+	local isCombat = mutant.CurrentHp ~= nil and mutant.MaxHp ~= nil
+
+	if not isCombat then
+		local labelColor = if isPlasma
+			then Color3.fromRGB(140, 220, 255)
+			elseif toxic then COLORS.Toxic
+			else COLORS.Cyan
+		labelOn(
+			body,
+			string.format("%s  •  Lv.%s", displayName, tostring(mutant.Level or 1)),
+			Vector3.new(0, if isPlasma then 4.1 else 2.6, 0),
+			labelColor
+		)
+	else
+		model:SetAttribute("UnitId", mutant.Id)
+		model:SetAttribute("CurrentHp", mutant.CurrentHp)
+		model:SetAttribute("MaxHp", mutant.MaxHp)
+
+		local combatGui = Instance.new("BillboardGui")
+		combatGui.Name = "CombatUnitUI"
+		combatGui.Size = UDim2.fromOffset(160, 44)
+		combatGui.StudsOffset = Vector3.new(0, if isPlasma then 3.8 else 3.2, 0)
+		combatGui.AlwaysOnTop = true
+		combatGui.Parent = body
+
+		local nameLabel = Instance.new("TextLabel")
+		nameLabel.Size = UDim2.new(1, 0, 0, 18)
+		nameLabel.BackgroundTransparency = 1
+		nameLabel.Font = Enum.Font.GothamBold
+		nameLabel.TextSize = 12
+		nameLabel.TextColor3 = if isPlasma
+			then Color3.fromRGB(170, 225, 255)
+			elseif toxic then COLORS.Toxic
+			else COLORS.Cyan
+		nameLabel.Text = string.format(
+			"[P] %s • Lv.%s (%s)",
+			displayName,
+			tostring(mutant.Level or 1),
+			string.upper(role)
+		)
+		nameLabel.Parent = combatGui
+
+		local hpBarBg = Instance.new("Frame")
+		hpBarBg.Name = "HpBarBg"
+		hpBarBg.Size = UDim2.new(1, -20, 0, 6)
+		hpBarBg.Position = UDim2.new(0, 10, 0, 20)
+		hpBarBg.BackgroundColor3 = COLORS.PanelSoft
+		hpBarBg.Parent = combatGui
+		addCorner(hpBarBg, 3)
+
+		local hpPct = math.clamp(mutant.CurrentHp / math.max(1, mutant.MaxHp), 0, 1)
+		local hpFill = Instance.new("Frame")
+		hpFill.Name = "HpFill"
+		hpFill.Size = UDim2.new(hpPct, 0, 1, 0)
+		hpFill.BackgroundColor3 = if hpPct > 0.5
+			then COLORS.Lime
+			elseif hpPct > 0.25 then COLORS.Orange
+			else COLORS.Red
+		hpFill.Parent = hpBarBg
+		addCorner(hpFill, 3)
+	end
+
 	model.Parent = parent
 	return model
 end
 
-local function makeHologramPlaceholder(parent, mutant, at, order)
+local function makeHologramPlaceholder(parent, mutant, at, order, isExpedition)
 	local model = Instance.new("Model")
 	model.Name = tostring(mutant.Id)
 	model:SetAttribute("MutantId", mutant.Id)
 	model:SetAttribute("Order", order or 1)
 	model:SetAttribute("IsHologram", true)
 
+	local ghostColor = if isExpedition then COLORS.Purple else COLORS.Cyan
 	local ghost = part(
 		model,
 		"Ghost",
 		Vector3.new(2.8, 2.3, 2.8),
 		at * CFrame.new(0, 1.4, 0),
-		COLORS.Cyan,
+		ghostColor,
 		Enum.Material.ForceField
 	)
 	ghost.Shape = Enum.PartType.Ball
@@ -390,17 +560,20 @@ local function makeHologramPlaceholder(parent, mutant, at, order)
 		"HoloRing",
 		Vector3.new(3.8, 0.08, 3.8),
 		at * CFrame.new(0, 0.25, 0),
-		COLORS.Orange,
-		Enum.Material.SmoothPlastic
+		if isExpedition then COLORS.Purple else COLORS.Orange,
+		Enum.Material.Neon
 	)
 	ring.Shape = Enum.PartType.Cylinder
 	ring.CFrame = at * CFrame.new(0, 0.25, 0) * CFrame.Angles(0, 0, math.pi / 2)
 
-	local displayName = if mutant.Type == "PlasmaBlob"
+	local mType = mutant.Type or mutant.Name or "Blob"
+	local displayName = if mType == "PlasmaBlob"
 		then "PLASMA BLOB"
-		elseif mutant.Type == "ToxicBlob" then "TOXIC BLOB"
+		elseif mType == "ToxicBlob" then "TOXIC BLOB"
 		else "BLOB"
-	labelOn(ghost, string.format("%s  •  IN TRAINING", displayName), Vector3.new(0, 2.4, 0), COLORS.Orange)
+	local statusText = if isExpedition then "DEPLOYED (EXPEDITION)" else "IN TRAINING"
+	local tagColor = if isExpedition then COLORS.Purple else COLORS.Orange
+	labelOn(ghost, string.format("%s  •  %s", displayName, statusText), Vector3.new(0, 2.4, 0), tagColor)
 	model.Parent = parent
 	return model
 end
@@ -409,7 +582,11 @@ local function makeEnemyUnit(parent, enemy, at, order)
 	local model = Instance.new("Model")
 	model.Name = tostring(enemy.Id)
 	model:SetAttribute("EnemyId", enemy.Id)
+	model:SetAttribute("UnitId", enemy.Id)
 	model:SetAttribute("Order", order or 1)
+	model:SetAttribute("IsEnemy", true)
+	model:SetAttribute("CurrentHp", enemy.CurrentHp)
+	model:SetAttribute("MaxHp", enemy.MaxHp)
 
 	local elem = if enemy.Stats and enemy.Stats.EffectiveElements
 		then enemy.Stats.EffectiveElements.Primary
@@ -423,26 +600,104 @@ local function makeEnemyUnit(parent, enemy, at, order)
 		else COLORS.Orange
 
 	local bodySize = Vector3.new(3.6, 3.2, 3.6)
-	local body = part(model, "Body", bodySize, at * CFrame.new(0, 1.8, 0), bodyColor, Enum.Material.Neon)
+	local body =
+		part(model, "Body", bodySize, at * CFrame.new(0, 1.6, 0), bodyColor, Enum.Material.SmoothPlastic)
 	body.Shape = Enum.PartType.Ball
 	model.PrimaryPart = body
 
-	for index, x in { -0.6, 0.6 } do
+	model:SetAttribute("BaseX", body.Position.X)
+	model:SetAttribute("BaseY", body.Position.Y)
+	model:SetAttribute("BaseZ", body.Position.Z)
+	model:SetAttribute("BaseSizeX", bodySize.X)
+	model:SetAttribute("BaseSizeY", bodySize.Y)
+	model:SetAttribute("BaseSizeZ", bodySize.Z)
+
+	-- Eyes facing forward towards player squad (+Z relative to at)
+	for index, x in { -0.58, 0.58 } do
 		local eye = part(
 			model,
 			"Eye_" .. tostring(index),
-			Vector3.new(0.5, 0.6, 0.3),
-			at * CFrame.new(x, 2.1, -1.5),
-			COLORS.Red,
+			Vector3.new(0.52, 0.65, 0.3),
+			at * CFrame.new(x, 1.95, 1.42),
+			Color3.fromRGB(255, 60, 60),
 			Enum.Material.Neon
 		)
 		eye.Shape = Enum.PartType.Ball
+		local pupil = part(
+			model,
+			"Pupil_" .. tostring(index),
+			Vector3.new(0.22, 0.32, 0.16),
+			at * CFrame.new(x, 1.95, 1.58),
+			Color3.fromRGB(25, 0, 0),
+			Enum.Material.SmoothPlastic
+		)
+		pupil.Shape = Enum.PartType.Ball
 	end
+
+	-- Menacing horns or armor features based on enemy role
+	if enemy.Role == "Striker" then
+		for index, x in { -1.1, 1.1 } do
+			local horn = part(
+				model,
+				"StrikerHorn",
+				Vector3.new(1.4, 0.35, 0.35),
+				at
+					* CFrame.new(x, 2.9, 0.2)
+					* CFrame.Angles(0, 0, (if x < 0 then 1 else -1) * 0.4 + math.pi / 2),
+				bodyColor,
+				Enum.Material.Neon
+			)
+			horn.Shape = Enum.PartType.Cylinder
+		end
+	elseif enemy.Role == "Guardian" then
+		part(
+			model,
+			"GuardianShield",
+			Vector3.new(3.8, 2.0, 0.4),
+			at * CFrame.new(0, 1.5, 1.65),
+			COLORS.Metal,
+			Enum.Material.DiamondPlate
+		)
+	elseif enemy.Role == "Controller" then
+		-- Psionic crown nodes
+		for idx = -1, 1 do
+			local node = part(
+				model,
+				"PsionicNode_" .. tostring(idx),
+				Vector3.new(0.45, 0.45, 0.45),
+				at * CFrame.new(idx * 0.9, 3.2 + math.abs(idx) * 0.2, 0.1),
+				Color3.fromRGB(255, 120, 220),
+				Enum.Material.Neon
+			)
+			node.Shape = Enum.PartType.Ball
+		end
+	elseif enemy.Role == "Support" then
+		local crown = part(
+			model,
+			"SupportHalo",
+			Vector3.new(0.08, 2.8, 2.8),
+			at * CFrame.new(0, 3.4, 0) * CFrame.Angles(0, 0, math.pi / 2),
+			Color3.fromRGB(80, 255, 160),
+			Enum.Material.Neon
+		)
+		crown.Shape = Enum.PartType.Cylinder
+	end
+
+	-- Ground Base Ring
+	local baseRing = part(
+		model,
+		"BaseRing",
+		Vector3.new(0.08, 4.2, 4.2),
+		at * CFrame.new(0, 0.1, 0) * CFrame.Angles(0, 0, math.pi / 2),
+		bodyColor,
+		Enum.Material.Neon
+	)
+	baseRing.Shape = Enum.PartType.Cylinder
 
 	local hl = Instance.new("Highlight")
 	hl.Name = "EnemyHighlight"
 	hl.FillColor = bodyColor
-	hl.FillTransparency = 0.65
+	hl.FillTransparency = 0.75
 	hl.OutlineColor = COLORS.Red
 	hl.OutlineTransparency = 0.2
 	hl.Adornee = model
@@ -450,8 +705,8 @@ local function makeEnemyUnit(parent, enemy, at, order)
 
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "EnemyUI"
-	gui.Size = UDim2.fromOffset(160, 42)
-	gui.StudsOffset = Vector3.new(0, 3.4, 0)
+	gui.Size = UDim2.fromOffset(160, 44)
+	gui.StudsOffset = Vector3.new(0, 3.6, 0)
 	gui.AlwaysOnTop = true
 	gui.Parent = body
 
@@ -459,20 +714,22 @@ local function makeEnemyUnit(parent, enemy, at, order)
 	nameLabel.Size = UDim2.new(1, 0, 0, 20)
 	nameLabel.BackgroundTransparency = 1
 	nameLabel.Font = Enum.Font.GothamBold
-	nameLabel.TextSize = 13
+	nameLabel.TextSize = 12
 	nameLabel.TextColor3 = COLORS.Red
 	nameLabel.Text = string.format("[E] %s", enemy.Name)
 	nameLabel.Parent = gui
 
 	local hpBarBg = Instance.new("Frame")
+	hpBarBg.Name = "HpBarBg"
 	hpBarBg.Size = UDim2.new(1, -20, 0, 6)
 	hpBarBg.Position = UDim2.new(0, 10, 0, 22)
 	hpBarBg.BackgroundColor3 = COLORS.PanelSoft
 	hpBarBg.Parent = gui
 	addCorner(hpBarBg, 3)
 
-	local hpPct = math.clamp(enemy.CurrentHp / math.max(1, enemy.MaxHp), 0, 1)
+	local hpPct = math.clamp((enemy.CurrentHp or 0) / math.max(1, enemy.MaxHp or 1), 0, 1)
 	local hpFill = Instance.new("Frame")
+	hpFill.Name = "HpFill"
 	hpFill.Size = UDim2.new(hpPct, 0, 1, 0)
 	hpFill.BackgroundColor3 = if hpPct > 0.5
 		then COLORS.Lime
@@ -581,6 +838,19 @@ function WorldController.new()
 	self._mergeFolder = nil
 	self._dnaHelixModel = nil
 	self._portalRingModel = nil
+	self._expeditionFolder = nil
+	self._selectedCombatTargetId = nil
+	self._currentExpeditionRoom = nil
+	self._currentExpeditionId = nil
+	self._lastCombatLogCount = nil
+	self._combatCameraShake = 0
+	self._inExpedition = false
+	self._cameraYaw = 0
+	self._cameraPitch = math.rad(28)
+	self._cameraDistance = 14.5
+	self._cameraFocusPoint = Vector3.new(20, 1.8, -3.5)
+	self._isDraggingCamera = false
+	self._inputConnections = {}
 	return self
 end
 
@@ -938,7 +1208,7 @@ function WorldController:Start()
 	for _, spec in
 		{
 			{ x = -18, z = 14, color = COLORS.Cyan, label = "CRYO-CHAMBER 01" },
-			{ x = 18, z = 14, color = COLORS.Toxic, label = "CRYO-CHAMBER 02" },
+			{ x = -18, z = 22, color = COLORS.Toxic, label = "CRYO-CHAMBER 02" },
 		}
 	do
 		local tubeBase = part(
@@ -1152,6 +1422,72 @@ function WorldController:Start()
 
 	labelOn(portalCol, "QUANTUM GATEWAY // EXPEDITIONS", Vector3.new(0, 3.8, 0), COLORS.Purple)
 
+	-- Quantum Expedition Battle Arena Platform & Perimeter
+	part(
+		architecture,
+		"ExpeditionArenaBase",
+		Vector3.new(20, 0.45, 18),
+		CFrame.new(20, 0.22, -3.5),
+		COLORS.Panel,
+		Enum.Material.DiamondPlate,
+		true
+	)
+	part(
+		architecture,
+		"ExpeditionPlayerBorder",
+		Vector3.new(20.2, 0.08, 0.35),
+		CFrame.new(20, 0.46, 5.5),
+		COLORS.Cyan,
+		Enum.Material.Neon,
+		false
+	)
+	part(
+		architecture,
+		"ExpeditionEnemyBorder",
+		Vector3.new(20.2, 0.08, 0.35),
+		CFrame.new(20, 0.46, -12.5),
+		COLORS.Purple,
+		Enum.Material.Neon,
+		false
+	)
+	part(
+		architecture,
+		"ExpeditionCenterLine",
+		Vector3.new(19.8, 0.04, 0.2),
+		CFrame.new(20, 0.46, -3.5),
+		COLORS.Muted,
+		Enum.Material.Neon,
+		false
+	)
+	for _, px in { 10, 30 } do
+		for _, pz in { 5.5, -12.5 } do
+			local pylon = part(
+				architecture,
+				"ArenaPylon",
+				Vector3.new(0.6, 3.2, 0.6),
+				CFrame.new(px, 1.6, pz),
+				COLORS.DeepSlate,
+				Enum.Material.Metal,
+				true
+			)
+			local beacon = part(
+				architecture,
+				"ArenaPylonBeacon",
+				Vector3.new(0.8, 0.8, 0.8),
+				CFrame.new(px, 3.4, pz),
+				if pz > 0 then COLORS.Cyan else COLORS.Purple,
+				Enum.Material.Neon,
+				false
+			)
+			beacon.Shape = Enum.PartType.Ball
+			local pLight = Instance.new("PointLight")
+			pLight.Color = if pz > 0 then COLORS.Cyan else COLORS.Purple
+			pLight.Range = 9
+			pLight.Brightness = 0.8
+			pLight.Parent = beacon
+		end
+	end
+
 	-- 8. Station 4: Central Combat Arena & 6 Mutant Pads
 	part(
 		architecture,
@@ -1269,7 +1605,136 @@ function WorldController:Start()
 				* CFrame.Angles(0, now * 1.4, 0)
 				* CFrame.Angles(0, 0, math.pi / 2)
 		end
+		if self._inExpedition then
+			local char = Players.LocalPlayer.Character
+			if char then
+				for _, p in char:GetDescendants() do
+					if p:IsA("BasePart") or p:IsA("Decal") then
+						p.LocalTransparencyModifier = 1
+					end
+				end
+			end
+			if self._camera then
+				self._camera.CameraType = Enum.CameraType.Scriptable
+
+				-- Smooth keyboard orbit / zoom when not typing in chat
+				if not UserInputService:GetFocusedTextBox() then
+					if
+						UserInputService:IsKeyDown(Enum.KeyCode.A)
+						or UserInputService:IsKeyDown(Enum.KeyCode.Left)
+					then
+						self._cameraYaw = (self._cameraYaw + 0.03) % (math.pi * 2)
+					end
+					if
+						UserInputService:IsKeyDown(Enum.KeyCode.D)
+						or UserInputService:IsKeyDown(Enum.KeyCode.Right)
+					then
+						self._cameraYaw = (self._cameraYaw - 0.03) % (math.pi * 2)
+					end
+					if
+						UserInputService:IsKeyDown(Enum.KeyCode.W)
+						or UserInputService:IsKeyDown(Enum.KeyCode.Up)
+					then
+						self._cameraDistance = math.clamp(self._cameraDistance - 0.2, 7, 28)
+					end
+					if
+						UserInputService:IsKeyDown(Enum.KeyCode.S)
+						or UserInputService:IsKeyDown(Enum.KeyCode.Down)
+					then
+						self._cameraDistance = math.clamp(self._cameraDistance + 0.2, 7, 28)
+					end
+				end
+
+				-- Smooth drag orbit via GetMouseLocation
+				if self._isDraggingCamera then
+					local currentMouse = UserInputService:GetMouseLocation()
+					if self._lastMousePos then
+						local dx = currentMouse.X - self._lastMousePos.X
+						local dy = currentMouse.Y - self._lastMousePos.Y
+						if dx ~= 0 or dy ~= 0 then
+							self._cameraYaw = (self._cameraYaw - dx * 0.005) % (math.pi * 2)
+							self._cameraPitch =
+								math.clamp(self._cameraPitch + dy * 0.004, math.rad(10), math.rad(75))
+						end
+					end
+					self._lastMousePos = currentMouse
+				end
+
+				local focus = self._cameraFocusPoint or Vector3.new(20, 1.8, -3.5)
+				local dist = self._cameraDistance or 14.5
+				local pitch = self._cameraPitch or math.rad(28)
+				local yaw = self._cameraYaw or 0
+
+				local hDist = dist * math.cos(pitch)
+				local vDist = dist * math.sin(pitch)
+				local offsetX = hDist * math.sin(yaw)
+				local offsetZ = hDist * math.cos(yaw)
+
+				local camPos = focus + Vector3.new(offsetX, vDist, offsetZ)
+
+				if self._combatCameraShake and self._combatCameraShake > 0 then
+					local shake = (math.random() - 0.5) * self._combatCameraShake * 1.5
+					camPos += Vector3.new(shake, shake * 0.5, 0)
+					self._combatCameraShake = math.max(0, self._combatCameraShake - 0.03)
+				end
+				self._camera.CFrame = CFrame.lookAt(camPos, focus)
+			end
+		end
 	end)
+
+	local inputConn1 = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if not self._inExpedition then
+			return
+		end
+		if
+			input.UserInputType == Enum.UserInputType.MouseButton2
+			or input.UserInputType == Enum.UserInputType.MouseButton3
+		then
+			self._isDraggingCamera = true
+			self._lastMousePos = UserInputService:GetMouseLocation()
+		elseif input.UserInputType == Enum.UserInputType.Touch and not gameProcessed then
+			self._isDraggingCamera = true
+			self._lastMousePos = Vector2.new(input.Position.X, input.Position.Y)
+		elseif input.KeyCode == Enum.KeyCode.R and not gameProcessed then
+			self:ResetCombatCamera()
+		end
+	end)
+
+	local inputConn2 = UserInputService.InputEnded:Connect(function(input)
+		if
+			input.UserInputType == Enum.UserInputType.MouseButton2
+			or input.UserInputType == Enum.UserInputType.MouseButton3
+			or input.UserInputType == Enum.UserInputType.Touch
+		then
+			self._isDraggingCamera = false
+			self._lastMousePos = nil
+		end
+	end)
+
+	local inputConn3 = UserInputService.InputChanged:Connect(function(input, gameProcessed)
+		if not self._inExpedition then
+			return
+		end
+		if
+			(
+				input.UserInputType == Enum.UserInputType.MouseMovement
+				or input.UserInputType == Enum.UserInputType.Touch
+			) and self._isDraggingCamera
+		then
+			local delta = input.Delta
+			if delta.X ~= 0 or delta.Y ~= 0 then
+				self._cameraYaw = (self._cameraYaw - delta.X * 0.005) % (math.pi * 2)
+				self._cameraPitch =
+					math.clamp(self._cameraPitch + delta.Y * 0.004, math.rad(10), math.rad(75))
+			end
+		elseif input.UserInputType == Enum.UserInputType.MouseWheel then
+			self._cameraDistance = math.clamp(self._cameraDistance - input.Position.Z * 1.5, 7, 28)
+		end
+	end)
+
+	table.insert(self._inputConnections, inputConn1)
+	table.insert(self._inputConnections, inputConn2)
+	table.insert(self._inputConnections, inputConn3)
 end
 
 function WorldController:_clear(folder)
@@ -1703,6 +2168,9 @@ function WorldController:SetState(snapshot)
 			for _, u in snapshot.Expedition.CurrentCombat.PlayerTeam.Active do
 				if u.IsAlive ~= false and u.CurrentHp and u.CurrentHp > 0 then
 					expeditionMutantIds[u.Id] = u
+					if string.sub(u.Id, 1, 2) == "p_" then
+						expeditionMutantIds[string.sub(u.Id, 3)] = u
+					end
 				end
 			end
 		end
@@ -1713,8 +2181,10 @@ function WorldController:SetState(snapshot)
 		if index <= 6 then
 			local padCFrame = CFrame.new(-13 + (index - 1) * 5.1, 0.5, 3)
 			local model
-			if mutant.Id == battlingMutantId or expeditionMutantIds[mutant.Id] then
-				model = makeHologramPlaceholder(self._display, mutant, padCFrame, index)
+			local isExpMutant = expeditionMutantIds[mutant.Id] ~= nil
+				or expeditionMutantIds["p_" .. mutant.Id] ~= nil
+			if mutant.Id == battlingMutantId or isExpMutant then
+				model = makeHologramPlaceholder(self._display, mutant, padCFrame, index, isExpMutant)
 			else
 				model = makeBlob(self._display, mutant, padCFrame, index)
 			end
@@ -1745,13 +2215,22 @@ function WorldController:SetState(snapshot)
 	end
 	self:_updateSelectionHighlights()
 
-	if self._camera then
-		if inExpedition then
-			self._camera.CameraType = Enum.CameraType.Scriptable
-			self._camera.CFrame = CFrame.new(20, 4.5, 3.5) * CFrame.Angles(math.rad(-15), 0, 0)
-		else
+	local wasInExpedition = self._inExpedition
+	self._inExpedition = inExpedition
+
+	if inExpedition and not wasInExpedition then
+		self:ResetCombatCamera()
+	elseif not inExpedition and wasInExpedition then
+		local char = Players.LocalPlayer.Character
+		if char then
+			for _, p in char:GetDescendants() do
+				if p:IsA("BasePart") or p:IsA("Decal") then
+					p.LocalTransparencyModifier = 0
+				end
+			end
+		end
+		if self._camera then
 			self._camera.CameraType = Enum.CameraType.Custom
-			local char = Players.LocalPlayer.Character
 			if char then
 				local hum = char:FindFirstChildOfClass("Humanoid")
 				if hum then
@@ -1785,45 +2264,682 @@ function WorldController:SetState(snapshot)
 
 	-- Expedition 3D Combat Visualization
 	if self._expeditionFolder then
-		self:_clear(self._expeditionFolder)
 		if snapshot.Expedition and snapshot.Expedition.InCombat and snapshot.Expedition.CurrentCombat then
 			local combat = snapshot.Expedition.CurrentCombat
+			local currentRoom = snapshot.Expedition.CurrentRoomIndex
+			local expId = snapshot.Expedition.Id or "exp"
+			local isNewRoom = self._currentExpeditionRoom ~= currentRoom or self._currentExpeditionId ~= expId
 
-			-- Render Enemies
-			local enemyTeam = combat.EnemyTeam
-			if enemyTeam and enemyTeam.Active then
-				local livingEnemies = {}
-				for _, enemy in enemyTeam.Active do
-					if (enemy.IsAlive ~= false) and enemy.CurrentHp and enemy.CurrentHp > 0 then
-						table.insert(livingEnemies, enemy)
+			if isNewRoom then
+				self._currentExpeditionRoom = currentRoom
+				self._currentExpeditionId = expId
+				self._lastCombatLogCount = #(combat.Log or {})
+				self:_rebuildExpeditionModels(combat)
+			else
+				self:_updateExpeditionModels(combat)
+				local log = combat.Log or {}
+				if self._lastCombatLogCount and #log > self._lastCombatLogCount then
+					for i = self._lastCombatLogCount + 1, #log do
+						self:_playCombatAction(log[i])
 					end
-				end
-				local count = #livingEnemies
-				for i, enemy in livingEnemies do
-					local offsetX = (i - (count + 1) / 2) * 3.8
-					local at = CFrame.new(20 + offsetX, 1.0, -6) * CFrame.Angles(0, math.pi, 0)
-					makeEnemyUnit(self._expeditionFolder, enemy, at, i)
+					self._lastCombatLogCount = #log
+				elseif self._lastCombatLogCount == nil then
+					self._lastCombatLogCount = #log
 				end
 			end
+		else
+			self._currentExpeditionRoom = nil
+			self._currentExpeditionId = nil
+			self._lastCombatLogCount = nil
+			self:_clear(self._expeditionFolder)
+		end
+	end
+end
 
-			-- Render Player Squad
-			local playerTeam = combat.PlayerTeam
-			if playerTeam and playerTeam.Active then
-				local livingPlayers = {}
-				for _, p in playerTeam.Active do
-					if p.IsAlive ~= false and p.CurrentHp and p.CurrentHp > 0 then
-						table.insert(livingPlayers, p)
-					end
+local COMBAT_SOUNDS = {
+	Hit = "rbxasset://sounds/action_falling_feather.mp3",
+	Crit = "rbxasset://sounds/snap.wav",
+	Heal = "rbxasset://sounds/electronicpingshort.wav",
+	Whoosh = "rbxasset://sounds/action_jump.mp3",
+	Battle = "rbxasset://sounds/impact_water.mp3",
+}
+
+function WorldController:_playSound(soundName)
+	local id = COMBAT_SOUNDS[soundName]
+	if not id then
+		return
+	end
+	pcall(function()
+		local sound = Instance.new("Sound")
+		sound.SoundId = id
+		sound.Volume = 0.6
+		sound.Parent = game:GetService("SoundService")
+		sound.PlayOnRemove = true
+		sound:Destroy()
+	end)
+end
+
+function WorldController:_isMatchingUnit(model, unitId)
+	if not model or not unitId then
+		return false
+	end
+	local mName = model.Name
+	local uId = model:GetAttribute("UnitId")
+	local eId = model:GetAttribute("EnemyId")
+	if mName == unitId or uId == unitId or eId == unitId then
+		return true
+	end
+	if string.sub(unitId, 1, 2) == "p_" then
+		local rawId = string.sub(unitId, 3)
+		if mName == rawId or uId == rawId or eId == rawId then
+			return true
+		end
+	end
+	if uId and string.sub(tostring(uId), 1, 2) == "p_" then
+		local rawId = string.sub(tostring(uId), 3)
+		if rawId == unitId then
+			return true
+		end
+	end
+	return false
+end
+
+function WorldController:_findCombatUnitModel(unitId)
+	if not self._expeditionFolder or not unitId then
+		return nil
+	end
+	for _, m in self._expeditionFolder:GetChildren() do
+		if self:_isMatchingUnit(m, unitId) then
+			return m
+		end
+	end
+	return nil
+end
+
+function WorldController:SetCombatTarget(targetId)
+	self._selectedCombatTargetId = targetId
+	self:_updateCombatTargetHighlights()
+end
+
+function WorldController:_updateCombatTargetHighlights()
+	if not self._expeditionFolder then
+		return
+	end
+	for _, model in self._expeditionFolder:GetChildren() do
+		local isTarget = model:GetAttribute("IsEnemy") == true
+			and self:_isMatchingUnit(model, self._selectedCombatTargetId)
+		local hl = model:FindFirstChildOfClass("Highlight")
+		local reticle = model:FindFirstChild("TargetReticle", true)
+		if isTarget then
+			if hl then
+				hl.OutlineColor = Color3.fromRGB(255, 230, 60)
+				hl.OutlineTransparency = 0
+			end
+			if not reticle then
+				local body = model.PrimaryPart or model:FindFirstChild("Body")
+				if body then
+					local gui = Instance.new("BillboardGui")
+					gui.Name = "TargetReticle"
+					gui.Size = UDim2.fromOffset(120, 26)
+					gui.StudsOffset = Vector3.new(0, 5.0, 0)
+					gui.AlwaysOnTop = true
+					gui.Parent = body
+
+					local lbl = Instance.new("TextLabel")
+					lbl.Size = UDim2.fromScale(1, 1)
+					lbl.BackgroundTransparency = 1
+					lbl.Font = Enum.Font.GothamBlack
+					lbl.TextSize = 13
+					lbl.TextColor3 = Color3.fromRGB(255, 225, 60)
+					lbl.TextStrokeTransparency = 0
+					lbl.TextStrokeColor3 = Color3.fromRGB(30, 20, 0)
+					lbl.Text = "🎯 TARGET"
+					lbl.Parent = gui
 				end
-				local pCount = #livingPlayers
-				for i, p in livingPlayers do
-					local offsetX = (i - (pCount + 1) / 2) * 3.8
-					-- Place player blobs closer to camera (Z = -0.5), facing enemies (front is -Z so rotation is 0)
-					local at = CFrame.new(20 + offsetX, 0.4, -0.5)
-					makeBlob(self._expeditionFolder, p, at, i)
+			end
+		else
+			if hl then
+				hl.OutlineColor = if model:GetAttribute("IsEnemy") then COLORS.Red else COLORS.Cyan
+				hl.OutlineTransparency = 0.3
+			end
+			if reticle then
+				reticle:Destroy()
+			end
+		end
+	end
+end
+
+function WorldController:_updateActiveTurnIndicator(currentTurnUnitId)
+	if not self._expeditionFolder then
+		return
+	end
+	for _, model in self._expeditionFolder:GetChildren() do
+		local isTurn = self:_isMatchingUnit(model, currentTurnUnitId)
+		local body = model.PrimaryPart or model:FindFirstChild("Body")
+		local turnRing = model:FindFirstChild("ActiveTurnRing")
+		local turnMarker = model:FindFirstChild("TurnMarker")
+		if isTurn and body then
+			local isEnemy = model:GetAttribute("IsEnemy") == true
+			local ringColor = if isEnemy then COLORS.Orange else COLORS.Lime
+			if not turnRing then
+				local ring = part(
+					model,
+					"ActiveTurnRing",
+					Vector3.new(0.08, 4.6, 4.6),
+					CFrame.new(body.Position.X, 0.44, body.Position.Z) * CFrame.Angles(0, 0, math.pi / 2),
+					ringColor,
+					Enum.Material.Neon,
+					false
+				)
+				ring.Shape = Enum.PartType.Cylinder
+			end
+			if not turnMarker then
+				local gui = Instance.new("BillboardGui")
+				gui.Name = "TurnMarker"
+				gui.Size = UDim2.fromOffset(100, 24)
+				gui.StudsOffset = Vector3.new(0, 4.8, 0)
+				gui.AlwaysOnTop = true
+				gui.Parent = body
+
+				local lbl = Instance.new("TextLabel")
+				lbl.Name = "TurnLabel"
+				lbl.Size = UDim2.fromScale(1, 1)
+				lbl.BackgroundTransparency = 1
+				lbl.Font = Enum.Font.GothamBlack
+				lbl.TextSize = 13
+				lbl.TextColor3 = ringColor
+				lbl.TextStrokeTransparency = 0
+				lbl.TextStrokeColor3 = Color3.fromRGB(15, 15, 15)
+				lbl.Text = "▼ ACTING"
+				lbl.Parent = gui
+			end
+		else
+			if turnRing then
+				turnRing:Destroy()
+			end
+			if turnMarker then
+				turnMarker:Destroy()
+			end
+		end
+	end
+end
+
+function WorldController:_spawnFloatingCombatText(position, text, color, isCrit)
+	local popupPart = Instance.new("Part")
+	popupPart.Name = "DamagePopup"
+	popupPart.Transparency = 1
+	popupPart.CanCollide = false
+	popupPart.Anchored = true
+	popupPart.Size = Vector3.new(1, 1, 1)
+	popupPart.Position = position + Vector3.new(0, 2.8, 0)
+	popupPart.Parent = self._root
+
+	local gui = Instance.new("BillboardGui")
+	gui.Size = if isCrit then UDim2.fromOffset(200, 55) else UDim2.fromOffset(150, 42)
+	gui.StudsOffset = Vector3.new(0, 0, 0)
+	gui.AlwaysOnTop = true
+	gui.Parent = popupPart
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBlack
+	label.TextSize = if isCrit then 22 else 17
+	label.TextColor3 = color or Color3.fromRGB(255, 200, 50)
+	label.TextStrokeTransparency = 0
+	label.TextStrokeColor3 = Color3.fromRGB(15, 15, 20)
+	label.Text = text
+	label.Parent = gui
+
+	task.spawn(function()
+		local duration = 0.85
+		local tStart = os.clock()
+		local startY = popupPart.Position.Y
+		while true do
+			local elapsed = os.clock() - tStart
+			local alpha = math.clamp(elapsed / duration, 0, 1)
+			popupPart.Position = Vector3.new(popupPart.Position.X, startY + alpha * 3.2, popupPart.Position.Z)
+			label.TextTransparency = alpha * alpha
+			label.TextStrokeTransparency = alpha * alpha
+			if alpha >= 1 then
+				break
+			end
+			task.wait()
+		end
+		popupPart:Destroy()
+	end)
+end
+
+function WorldController:_spawnImpactVFX(position, color)
+	local shock = Instance.new("Part")
+	shock.Name = "ImpactFlash"
+	shock.Shape = Enum.PartType.Ball
+	shock.Size = Vector3.new(0.5, 0.5, 0.5)
+	shock.Color = color or COLORS.Orange
+	shock.Material = Enum.Material.Neon
+	shock.CanCollide = false
+	shock.Anchored = true
+	shock.Position = position
+	shock.Parent = self._root
+
+	local light = Instance.new("PointLight")
+	light.Color = color or COLORS.Orange
+	light.Range = 10
+	light.Brightness = 3.0
+	light.Parent = shock
+
+	task.spawn(function()
+		local duration = 0.22
+		local tStart = os.clock()
+		while true do
+			local elapsed = os.clock() - tStart
+			local alpha = math.clamp(elapsed / duration, 0, 1)
+			local scale = 0.5 + alpha * 3.5
+			shock.Size = Vector3.new(scale, scale, scale)
+			shock.Transparency = alpha
+			light.Brightness = (1 - alpha) * 3.0
+			if alpha >= 1 then
+				break
+			end
+			task.wait()
+		end
+		shock:Destroy()
+	end)
+end
+
+function WorldController:_flinchTarget(targetModel, pushDir)
+	local primary = targetModel.PrimaryPart or targetModel:FindFirstChild("Body")
+	if not primary then
+		return
+	end
+	local basePos = Vector3.new(
+		targetModel:GetAttribute("BaseX") or primary.Position.X,
+		targetModel:GetAttribute("BaseY") or primary.Position.Y,
+		targetModel:GetAttribute("BaseZ") or primary.Position.Z
+	)
+	local hl = targetModel:FindFirstChildOfClass("Highlight")
+	local oldFill = hl and hl.FillColor
+	local oldFillTrans = hl and hl.FillTransparency
+	if hl then
+		hl.FillColor = Color3.new(1, 1, 1)
+		hl.FillTransparency = 0.1
+	end
+	targetModel:SetAttribute("IsActionAnimating", true)
+	task.spawn(function()
+		local flinchOffset = (pushDir or Vector3.new(0, 0, 1)) * 1.3
+		targetModel:PivotTo(CFrame.new(basePos + flinchOffset))
+		task.wait(0.08)
+		if hl then
+			hl.FillColor = oldFill or COLORS.Red
+			hl.FillTransparency = oldFillTrans or 0.65
+		end
+		local tStart = os.clock()
+		while true do
+			local elapsed = os.clock() - tStart
+			local alpha = math.clamp(elapsed / 0.15, 0, 1)
+			local p = (basePos + flinchOffset):Lerp(basePos, alpha)
+			targetModel:PivotTo(CFrame.new(p))
+			if alpha >= 1 then
+				break
+			end
+			task.wait()
+		end
+		targetModel:PivotTo(CFrame.new(basePos))
+		targetModel:SetAttribute("IsActionAnimating", nil)
+	end)
+end
+
+function WorldController:_fireElementalProjectile(startPos, endPos, color)
+	local proj = Instance.new("Part")
+	proj.Name = "CombatProjectile"
+	proj.Shape = Enum.PartType.Ball
+	proj.Size = Vector3.new(1.0, 1.0, 1.0)
+	proj.Color = color
+	proj.Material = Enum.Material.Neon
+	proj.CanCollide = false
+	proj.Anchored = true
+	proj.Position = startPos
+	proj.Parent = self._root
+
+	local light = Instance.new("PointLight")
+	light.Color = color
+	light.Range = 8
+	light.Brightness = 2.0
+	light.Parent = proj
+
+	local flyDuration = 0.22
+	local tStart = os.clock()
+	while true do
+		local elapsed = os.clock() - tStart
+		local alpha = math.clamp(elapsed / flyDuration, 0, 1)
+		proj.Position = startPos:Lerp(endPos, alpha)
+		if alpha >= 1 then
+			break
+		end
+		task.wait()
+	end
+	proj:Destroy()
+end
+
+function WorldController:_playDefeatAnimation(model)
+	if model:GetAttribute("IsDying") then
+		return
+	end
+	model:SetAttribute("IsDying", true)
+	local primary = model.PrimaryPart or model:FindFirstChild("Body")
+	local basePos = primary and primary.Position or Vector3.new(0, 0, 0)
+
+	task.spawn(function()
+		self:_spawnImpactVFX(basePos + Vector3.new(0, 1, 0), Color3.fromRGB(255, 60, 60))
+		local tStart = os.clock()
+		local duration = 0.45
+		local origSize = primary and primary.Size or Vector3.new(3, 3, 3)
+		while true do
+			local elapsed = os.clock() - tStart
+			local alpha = math.clamp(elapsed / duration, 0, 1)
+			local scale = math.max(0.05, 1 - alpha)
+			if primary then
+				primary.Size = origSize * scale
+				primary.Transparency = alpha
+			end
+			for _, desc in model:GetDescendants() do
+				if desc:IsA("BasePart") then
+					desc.Transparency = alpha
+				elseif desc:IsA("BillboardGui") then
+					desc.Enabled = false
+				end
+			end
+			if alpha >= 1 then
+				break
+			end
+			task.wait()
+		end
+		model:Destroy()
+	end)
+end
+
+function WorldController:_rebuildExpeditionModels(combat)
+	self:_clear(self._expeditionFolder)
+	if not combat then
+		return
+	end
+
+	-- Living Enemies
+	local livingEnemies = {}
+	if combat.EnemyTeam and combat.EnemyTeam.Active then
+		for _, enemy in combat.EnemyTeam.Active do
+			if (enemy.IsAlive ~= false) and enemy.CurrentHp and enemy.CurrentHp > 0 then
+				table.insert(livingEnemies, enemy)
+			end
+		end
+	end
+	local eCount = #livingEnemies
+	for i, enemy in ipairs(livingEnemies) do
+		local offsetX = (i - (eCount + 1) / 2) * 5.0
+		local offsetZ = if i == 2 and eCount == 3 then -9.4 else -8.8
+		-- Placed facing +Z towards player squad
+		local at = CFrame.new(20 + offsetX, 0.4, offsetZ)
+		makeEnemyUnit(self._expeditionFolder, enemy, at, i)
+	end
+
+	-- Living Player Squad
+	local livingPlayers = {}
+	if combat.PlayerTeam and combat.PlayerTeam.Active then
+		for _, p in combat.PlayerTeam.Active do
+			if p.IsAlive ~= false and p.CurrentHp and p.CurrentHp > 0 then
+				table.insert(livingPlayers, p)
+			end
+		end
+	end
+	local pCount = #livingPlayers
+	for i, p in ipairs(livingPlayers) do
+		local offsetX = (i - (pCount + 1) / 2) * 5.0
+		local offsetZ = if i == 2 and pCount == 3 then 1.2 else 2.2
+		-- Placed facing -Z towards enemies
+		local at = CFrame.new(20 + offsetX, 0.4, offsetZ)
+		makeBlob(self._expeditionFolder, p, at, i)
+	end
+
+	self:_updateActiveTurnIndicator(combat.CurrentTurnUnitId)
+	self:_updateCombatTargetHighlights()
+end
+
+function WorldController:_updateExpeditionModels(combat)
+	if not combat or not self._expeditionFolder then
+		return
+	end
+
+	-- Update player team units
+	if combat.PlayerTeam and combat.PlayerTeam.Active then
+		for _, p in combat.PlayerTeam.Active do
+			local model = self:_findCombatUnitModel(p.Id)
+			if model then
+				model:SetAttribute("CurrentHp", p.CurrentHp)
+				local hpFill = model:FindFirstChild("HpFill", true)
+				if hpFill and hpFill:IsA("Frame") then
+					local pct = math.clamp((p.CurrentHp or 0) / math.max(1, p.MaxHp or 1), 0, 1)
+					hpFill.Size = UDim2.new(pct, 0, 1, 0)
+					hpFill.BackgroundColor3 = if pct > 0.5
+						then COLORS.Lime
+						elseif pct > 0.25 then COLORS.Orange
+						else COLORS.Red
+				end
+				if p.CurrentHp <= 0 and not model:GetAttribute("IsDying") then
+					self:_playDefeatAnimation(model)
 				end
 			end
 		end
+	end
+
+	-- Update enemy team units
+	if combat.EnemyTeam and combat.EnemyTeam.Active then
+		for _, enemy in combat.EnemyTeam.Active do
+			local model = self:_findCombatUnitModel(enemy.Id)
+			if model then
+				model:SetAttribute("CurrentHp", enemy.CurrentHp)
+				local hpFill = model:FindFirstChild("HpFill", true)
+				if hpFill and hpFill:IsA("Frame") then
+					local pct = math.clamp((enemy.CurrentHp or 0) / math.max(1, enemy.MaxHp or 1), 0, 1)
+					hpFill.Size = UDim2.new(pct, 0, 1, 0)
+					hpFill.BackgroundColor3 = if pct > 0.5
+						then COLORS.Lime
+						elseif pct > 0.25 then COLORS.Orange
+						else COLORS.Red
+				end
+				if enemy.CurrentHp <= 0 and not model:GetAttribute("IsDying") then
+					self:_playDefeatAnimation(model)
+				end
+			end
+		end
+	end
+
+	self:_updateActiveTurnIndicator(combat.CurrentTurnUnitId)
+	self:_updateCombatTargetHighlights()
+end
+
+function WorldController:_playCombatAction(entry)
+	if not entry then
+		return
+	end
+	local actorModel = self:_findCombatUnitModel(entry.ActorId)
+	local targetModel = entry.TargetId and self:_findCombatUnitModel(entry.TargetId)
+
+	if not actorModel then
+		if targetModel and entry.Damage and entry.Damage > 0 then
+			local tPrimary = targetModel.PrimaryPart or targetModel:FindFirstChild("Body")
+			if tPrimary then
+				self:_spawnFloatingCombatText(
+					tPrimary.Position,
+					"-" .. tostring(entry.Damage),
+					COLORS.Orange,
+					entry.IsCritical
+				)
+			end
+		end
+		return
+	end
+
+	local actorPrimary = actorModel.PrimaryPart or actorModel:FindFirstChild("Body")
+	if not actorPrimary then
+		return
+	end
+
+	local actorBasePos = Vector3.new(
+		actorModel:GetAttribute("BaseX") or actorPrimary.Position.X,
+		actorModel:GetAttribute("BaseY") or actorPrimary.Position.Y,
+		actorModel:GetAttribute("BaseZ") or actorPrimary.Position.Z
+	)
+
+	if entry.ActionType == "Basic" and targetModel then
+		local targetPrimary = targetModel.PrimaryPart or targetModel:FindFirstChild("Body")
+		if not targetPrimary then
+			return
+		end
+
+		local targetBasePos = Vector3.new(
+			targetModel:GetAttribute("BaseX") or targetPrimary.Position.X,
+			targetModel:GetAttribute("BaseY") or targetPrimary.Position.Y,
+			targetModel:GetAttribute("BaseZ") or targetPrimary.Position.Z
+		)
+
+		actorModel:SetAttribute("IsActionAnimating", true)
+		task.spawn(function()
+			local dir = (targetBasePos - actorBasePos)
+			local lungeTarget = targetBasePos - dir.Unit * 2.5
+			local lungeDuration = 0.22
+			local tStart = os.clock()
+
+			while true do
+				local elapsed = os.clock() - tStart
+				local alpha = math.clamp(elapsed / lungeDuration, 0, 1)
+				local arcY = math.sin(alpha * math.pi) * 2.2
+				local curPos = actorBasePos:Lerp(lungeTarget, alpha) + Vector3.new(0, arcY, 0)
+				actorModel:PivotTo(CFrame.new(curPos))
+				if alpha >= 1 then
+					break
+				end
+				task.wait()
+			end
+
+			-- IMPACT
+			self:_playSound("Hit")
+			if entry.IsCritical then
+				self:_playSound("Crit")
+				self._combatCameraShake = 0.35
+			end
+
+			self:_spawnImpactVFX(
+				targetBasePos + Vector3.new(0, 1.4, 0),
+				if entry.IsCritical then COLORS.Red else COLORS.Orange
+			)
+			self:_flinchTarget(targetModel, dir.Unit)
+
+			if entry.Damage and entry.Damage > 0 then
+				local text = if entry.IsCritical then "💥 CRIT! -" .. entry.Damage else "-" .. entry.Damage
+				local color = if entry.IsCritical
+					then Color3.fromRGB(255, 60, 60)
+					else Color3.fromRGB(255, 200, 50)
+				self:_spawnFloatingCombatText(targetBasePos, text, color, entry.IsCritical)
+			end
+
+			-- Return
+			local returnDuration = 0.18
+			local tRet = os.clock()
+			while true do
+				local elapsed = os.clock() - tRet
+				local alpha = math.clamp(elapsed / returnDuration, 0, 1)
+				local retArc = math.sin(alpha * math.pi) * 0.8
+				local curPos = lungeTarget:Lerp(actorBasePos, alpha) + Vector3.new(0, retArc, 0)
+				actorModel:PivotTo(CFrame.new(curPos))
+				if alpha >= 1 then
+					break
+				end
+				task.wait()
+			end
+			actorModel:PivotTo(CFrame.new(actorBasePos))
+			actorModel:SetAttribute("IsActionAnimating", nil)
+		end)
+	elseif
+		(entry.ActionType == "RoleSkill" or entry.ActionType == "Ultimate")
+		and targetModel
+		and entry.Damage
+		and entry.Damage > 0
+	then
+		local targetPrimary = targetModel.PrimaryPart or targetModel:FindFirstChild("Body")
+		if not targetPrimary then
+			return
+		end
+
+		local targetBasePos = Vector3.new(
+			targetModel:GetAttribute("BaseX") or targetPrimary.Position.X,
+			targetModel:GetAttribute("BaseY") or targetPrimary.Position.Y,
+			targetModel:GetAttribute("BaseZ") or targetPrimary.Position.Z
+		)
+
+		actorModel:SetAttribute("IsActionAnimating", true)
+		task.spawn(function()
+			spawnLightRing(self._root, actorBasePos + Vector3.new(0, 0.2, 0), COLORS.Purple, 4.8, 0.3)
+			task.wait(0.12)
+
+			self:_fireElementalProjectile(
+				actorBasePos + Vector3.new(0, 1.5, 0),
+				targetBasePos + Vector3.new(0, 1.5, 0),
+				COLORS.Purple
+			)
+
+			self:_playSound("Hit")
+			if entry.IsCritical then
+				self:_playSound("Crit")
+				self._combatCameraShake = 0.4
+			end
+
+			self:_spawnImpactVFX(targetBasePos + Vector3.new(0, 1.4, 0), COLORS.Purple)
+			self:_flinchTarget(targetModel, (targetBasePos - actorBasePos).Unit)
+
+			local text = if entry.IsCritical
+				then "💥 "
+					.. (if entry.ActionType == "Ultimate" then "ULTIMATE! -" else "CRIT! -")
+					.. entry.Damage
+				else "-" .. entry.Damage
+			self:_spawnFloatingCombatText(targetBasePos, text, Color3.fromRGB(255, 90, 220), true)
+
+			if string.find(string.lower(entry.Message or ""), "stun") then
+				self:_spawnFloatingCombatText(
+					targetBasePos + Vector3.new(0, 1.8, 0),
+					"💫 STUNNED!",
+					Color3.fromRGB(200, 100, 255),
+					false
+				)
+			end
+
+			actorModel:SetAttribute("IsActionAnimating", nil)
+		end)
+	elseif entry.Heal and entry.Heal > 0 and targetModel then
+		local targetPrimary = targetModel.PrimaryPart or targetModel:FindFirstChild("Body")
+		local targetBasePos = targetPrimary and targetPrimary.Position or actorBasePos
+		task.spawn(function()
+			self:_playSound("Heal")
+			spawnLightRing(self._root, actorBasePos + Vector3.new(0, 0.2, 0), COLORS.Lime, 5.0, 0.4)
+			spawnLightRing(self._root, targetBasePos + Vector3.new(0, 0.2, 0), COLORS.Lime, 5.0, 0.5)
+			self:_spawnFloatingCombatText(
+				targetBasePos,
+				"💚 +" .. entry.Heal .. " HP",
+				Color3.fromRGB(80, 255, 120),
+				false
+			)
+		end)
+	elseif
+		entry.ActionType == "RoleSkill"
+		and (
+			string.find(string.lower(entry.Message or ""), "boost")
+			or string.find(string.lower(entry.Message or ""), "surge")
+		)
+	then
+		task.spawn(function()
+			self:_playSound("Whoosh")
+			spawnLightRing(self._root, actorBasePos + Vector3.new(0, 0.2, 0), COLORS.Cyan, 6.5, 0.5)
+			self:_spawnFloatingCombatText(actorBasePos, "⚔️ +35% ATK (TEAM)", COLORS.Cyan, true)
+		end)
 	end
 end
 
@@ -1832,66 +2948,78 @@ function WorldController:_animateBlobs()
 		return
 	end
 	local now = workspace:GetServerTimeNow()
-	for _, child in self._display:GetChildren() do
-		local body = child:FindFirstChild("Body")
-		if body and body:IsA("BasePart") then
-			local order = child:GetAttribute("Order") or 1
-			local baseX = child:GetAttribute("BaseX")
-			local baseY = child:GetAttribute("BaseY")
-			local baseZ = child:GetAttribute("BaseZ")
-			local sizeX = child:GetAttribute("BaseSizeX")
-			local sizeY = child:GetAttribute("BaseSizeY")
-			local sizeZ = child:GetAttribute("BaseSizeZ")
+	local folders = { self._display }
+	if self._expeditionFolder then
+		table.insert(folders, self._expeditionFolder)
+	end
 
-			if baseX and baseY and sizeX then
-				local spawnStart = child:GetAttribute("SpawnStartTime")
-				if spawnStart then
-					local spawnElapsed = os.clock() - spawnStart
-					if spawnElapsed < 0.75 then
-						local dropY = 0
-						local scaleY = 1
-						local scaleXZ = 1
-						if spawnElapsed < 0.35 then
-							local t = spawnElapsed / 0.35
-							dropY = (1 - t) * (1 - t) * 4.5
-							scaleY = 1.0 + (1 - t) * 0.25
-							scaleXZ = 1.0 - (1 - t) * 0.15
-						elseif spawnElapsed < 0.5 then
-							local t = (spawnElapsed - 0.35) / 0.15
-							local squashFactor = math.sin(t * math.pi)
-							scaleY = 1.0 - squashFactor * 0.45
-							scaleXZ = 1.0 + squashFactor * 0.35
-						else
-							local t = (spawnElapsed - 0.5) / 0.25
-							local rebound = math.sin(t * math.pi) * 0.22
-							scaleY = 1.0 + rebound
-							scaleXZ = 1.0 - rebound * 0.15
-						end
-						body.Size = Vector3.new(sizeX * scaleXZ, sizeY * scaleY, sizeZ * scaleXZ)
-						body.Position = Vector3.new(baseX, baseY + dropY, baseZ)
-						continue
-					else
-						child:SetAttribute("SpawnStartTime", nil)
-					end
-				end
-
-				local wave = math.sin(now * 3 + order * 0.9)
-				local squashY = 1 + wave * 0.08
-				local stretchXZ = 1 - wave * 0.04
-				body.Size = Vector3.new(sizeX * stretchXZ, sizeY * squashY, sizeZ * stretchXZ)
-				body.Position = Vector3.new(baseX, baseY + wave * 0.06, baseZ)
+	for _, folder in ipairs(folders) do
+		for _, child in folder:GetChildren() do
+			if child:GetAttribute("IsActionAnimating") or child:GetAttribute("IsDying") then
+				continue
 			end
+			local body = child:FindFirstChild("Body")
+			if body and body:IsA("BasePart") then
+				local order = child:GetAttribute("Order") or 1
+				local baseX = child:GetAttribute("BaseX")
+				local baseY = child:GetAttribute("BaseY")
+				local baseZ = child:GetAttribute("BaseZ")
+				local sizeX = child:GetAttribute("BaseSizeX")
+				local sizeY = child:GetAttribute("BaseSizeY")
+				local sizeZ = child:GetAttribute("BaseSizeZ")
 
-			local blinkTimer = (now + order * 1.3) % 3.8
-			local isBlink = blinkTimer < 0.14
-			for _, eyeIndex in { 1, 2 } do
-				local eye = child:FindFirstChild("Eye_" .. tostring(eyeIndex))
-				local pupil = child:FindFirstChild("Pupil_" .. tostring(eyeIndex))
-				if eye and eye:IsA("BasePart") then
-					eye.Size = if isBlink then Vector3.new(0.5, 0.08, 0.28) else Vector3.new(0.5, 0.65, 0.28)
+				if baseX and baseY and sizeX then
+					local spawnStart = child:GetAttribute("SpawnStartTime")
+					if spawnStart then
+						local spawnElapsed = os.clock() - spawnStart
+						if spawnElapsed < 0.75 then
+							local dropY = 0
+							local scaleY = 1
+							local scaleXZ = 1
+							if spawnElapsed < 0.35 then
+								local t = spawnElapsed / 0.35
+								dropY = (1 - t) * (1 - t) * 4.5
+								scaleY = 1.0 + (1 - t) * 0.25
+								scaleXZ = 1.0 - (1 - t) * 0.15
+							elseif spawnElapsed < 0.5 then
+								local t = (spawnElapsed - 0.35) / 0.15
+								local squashFactor = math.sin(t * math.pi)
+								scaleY = 1.0 - squashFactor * 0.45
+								scaleXZ = 1.0 + squashFactor * 0.35
+							else
+								local t = (spawnElapsed - 0.5) / 0.25
+								local rebound = math.sin(t * math.pi) * 0.22
+								scaleY = 1.0 + rebound
+								scaleXZ = 1.0 - rebound * 0.15
+							end
+							body.Size = Vector3.new(sizeX * scaleXZ, sizeY * scaleY, sizeZ * scaleXZ)
+							body.Position = Vector3.new(baseX, baseY + dropY, baseZ)
+							continue
+						else
+							child:SetAttribute("SpawnStartTime", nil)
+						end
+					end
+
+					local wave = math.sin(now * 3 + order * 0.9)
+					local squashY = 1 + wave * 0.08
+					local stretchXZ = 1 - wave * 0.04
+					body.Size = Vector3.new(sizeX * stretchXZ, sizeY * squashY, sizeZ * stretchXZ)
+					body.Position = Vector3.new(baseX, baseY + wave * 0.06, baseZ)
 				end
-				if pupil and pupil:IsA("BasePart") then
-					pupil.Transparency = if isBlink then 1 else 0
+
+				local blinkTimer = (now + order * 1.3) % 3.8
+				local isBlink = blinkTimer < 0.14
+				for _, eyeIndex in { 1, 2 } do
+					local eye = child:FindFirstChild("Eye_" .. tostring(eyeIndex))
+					local pupil = child:FindFirstChild("Pupil_" .. tostring(eyeIndex))
+					if eye and eye:IsA("BasePart") then
+						eye.Size = if isBlink
+							then Vector3.new(0.5, 0.08, 0.28)
+							else Vector3.new(0.5, 0.65, 0.28)
+					end
+					if pupil and pupil:IsA("BasePart") then
+						pupil.Transparency = if isBlink then 1 else 0
+					end
 				end
 			end
 		end
@@ -2235,8 +3363,42 @@ function WorldController:_animateBattle()
 	end
 end
 
+function WorldController:ResetCombatCamera()
+	self._cameraYaw = 0
+	self._cameraPitch = math.rad(28)
+	self._cameraDistance = 14.5
+end
+
+function WorldController:SetCombatCameraOrbit(yaw, pitch, distance)
+	if yaw ~= nil then
+		self._cameraYaw = yaw % (math.pi * 2)
+	end
+	if pitch ~= nil then
+		self._cameraPitch = math.clamp(pitch, math.rad(10), math.rad(75))
+	end
+	if distance ~= nil then
+		self._cameraDistance = math.clamp(distance, 7, 28)
+	end
+end
+
+function WorldController:GetCombatCameraOrbit()
+	return {
+		Yaw = self._cameraYaw,
+		Pitch = self._cameraPitch,
+		Distance = self._cameraDistance,
+	}
+end
+
 function WorldController:Stop()
 	self:_completeMergeAnimation()
+	if self._inputConnections then
+		for _, conn in ipairs(self._inputConnections) do
+			if conn and conn.Disconnect then
+				conn:Disconnect()
+			end
+		end
+		self._inputConnections = {}
+	end
 	if self._renderConnection then
 		self._renderConnection:Disconnect()
 		self._renderConnection = nil

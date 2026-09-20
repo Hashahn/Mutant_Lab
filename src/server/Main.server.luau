@@ -2,6 +2,9 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
+local hasRunService, RunService = pcall(function()
+	return game:GetService("RunService")
+end)
 local root = ReplicatedStorage:WaitForChild("MutantLab")
 local shared = root:WaitForChild("Shared")
 local GameConfig = require(shared.Config.GameConfig)
@@ -105,6 +108,15 @@ local function creditExpeditionLoot(profile, expedition)
 	mergeSecuredLoot(profile, expedition:TakeUncreditedLoot())
 end
 
+local function checkAndUpdateRests(profile: any, now: number)
+	for index, m in ipairs(profile.Mutants) do
+		if m.RestUntil and m.RestUntil <= now then
+			local completed, _ = RestCooldownService.CompleteRest(m, now)
+			profile.Mutants[index] = completed
+		end
+	end
+end
+
 local function finalizeExpedition(profile, expedition)
 	if expedition.Finalized or (expedition.Status ~= "Completed" and expedition.Status ~= "Failed") then
 		return
@@ -121,12 +133,21 @@ local function participantBusy(session, mutantId)
 		return true
 	end
 	local expedition = session.Expedition
-	if not expedition or expedition.Finalized or expedition.Status == "Failed" then
+	if
+		not expedition
+		or expedition.Finalized
+		or expedition.Status == "Failed"
+		or expedition.Status == "Completed"
+	then
 		return false
 	end
-	for _, group in { expedition.PlayerSquad.Active, expedition.PlayerSquad.Reserve } do
-		for _, unit in group do
-			if unit.Id == "p_" .. mutantId then
+	local groups = { expedition.PlayerSquad.Active }
+	if expedition.PlayerSquad.Reserve then
+		table.insert(groups, expedition.PlayerSquad.Reserve)
+	end
+	for _, group in ipairs(groups) do
+		for _, unit in ipairs(group) do
+			if unit.Id == "p_" .. mutantId or unit.Id == mutantId then
 				return true
 			end
 		end
@@ -140,6 +161,7 @@ local function snapshot(player)
 	if not profile or not session then
 		return nil
 	end
+	checkAndUpdateRests(profile, os.time())
 	local snap = GameState.snapshot(profile, session.Battle, session.Revision, data.Mode)
 	if session.Expedition then
 		snap.Expedition = session.Expedition:GetSnapshot()
@@ -204,12 +226,22 @@ requestAction.OnServerInvoke = function(player, action, payload)
 	if closing or not session or not profile then
 		return { Ok = false, Code = "NOT_READY" }
 	end
+	checkAndUpdateRests(profile, os.time())
 	-- Legacy and expedition actions share the same ownership/rest locks.
 	local affectedIds = {}
 	if action == "Merge" or action == "BreedMutants" then
 		affectedIds = { payload.FirstId, payload.SecondId }
 	elseif action == "ReleaseMutant" or action == "StartBattle" then
 		affectedIds = { payload.MutantId }
+	elseif action == "StartExpedition" then
+		for _, id in ipairs(payload.ActiveIds) do
+			table.insert(affectedIds, id)
+		end
+		if payload.ReserveIds then
+			for _, id in ipairs(payload.ReserveIds) do
+				table.insert(affectedIds, id)
+			end
+		end
 	end
 	for _, id in affectedIds do
 		-- Preserve the legacy duplicate-training error.
@@ -229,7 +261,46 @@ requestAction.OnServerInvoke = function(player, action, payload)
 	local balance = profile.BioCoins
 	local ok, code, detail
 	-- Domain operations contain no yielding APIs. All validations precede mutations.
-	if action == "CreateBlob" then
+	if action == "DebugSetupSquad" and hasRunService and RunService and RunService:IsStudio() then
+		profile.Mutants = {
+			{
+				Id = "m_plasma_healer",
+				Type = "PlasmaBlob",
+				Tier = 3,
+				Level = 1,
+				Role = "Healer",
+				Genes = { { Element = "Plasma", Value = 80 }, { Element = "Biomass", Value = 40 } },
+			},
+			{
+				Id = "m_toxic_guardian",
+				Type = "ToxicBlob",
+				Tier = 2,
+				Level = 1,
+				Role = "Guardian",
+				Genes = { { Element = "Toxin", Value = 60 }, { Element = "Biomass", Value = 30 } },
+			},
+			{
+				Id = "m_blob_striker",
+				Type = "Blob",
+				Tier = 1,
+				Level = 1,
+				Role = "Striker",
+				Genes = { { Element = "Biomass", Value = 25 } },
+			},
+		}
+		profile.Tutorial = {
+			Started = true,
+			FreeBlobsClaimed = 2,
+			FirstBlobCreated = true,
+			FirstMergeCompleted = true,
+			FirstBattleStarted = true,
+			FirstBattleCompleted = true,
+			FirstBlobPurchased = true,
+			TutorialCompleted = true,
+		}
+		ok = true
+		code = "OK"
+	elseif action == "CreateBlob" then
 		ok, code = rules:CreateBlob(profile, session.Battle)
 	elseif action == "Merge" then
 		ok, code = rules:Merge(profile, session.Battle, payload.FirstId, payload.SecondId)
@@ -269,7 +340,9 @@ requestAction.OnServerInvoke = function(player, action, payload)
 				table.insert(activeUnits, {
 					Id = "p_" .. m.Id,
 					Name = m.Type,
+					Type = m.Type,
 					Tier = m.Tier,
+					Level = m.Level or 1,
 					Role = m.Role or "Striker",
 					Genes = m.Genes or {},
 				})
@@ -285,7 +358,9 @@ requestAction.OnServerInvoke = function(player, action, payload)
 					table.insert(reserveUnits, {
 						Id = "p_" .. m.Id,
 						Name = m.Type,
+						Type = m.Type,
 						Tier = m.Tier,
+						Level = m.Level or 1,
 						Role = m.Role or "Striker",
 						Genes = m.Genes or {},
 					})
@@ -463,6 +538,11 @@ local function added(player)
 end
 Players.PlayerAdded:Connect(added)
 Players.PlayerRemoving:Connect(function(player)
+	local profile = data:Get(player)
+	local session = sessions[player]
+	if profile and session and session.Expedition then
+		finalizeExpedition(profile, session.Expedition)
+	end
 	sessions[player] = nil
 	limiter:Remove(player)
 	data:Remove(player)
@@ -473,6 +553,12 @@ for _, player in Players:GetPlayers() do
 end
 game:BindToClose(function()
 	closing = true
+	for player, session in pairs(sessions) do
+		local profile = data:Get(player)
+		if profile and session and session.Expedition then
+			finalizeExpedition(profile, session.Expedition)
+		end
+	end
 	table.clear(sessions)
 	data:Close()
 end)

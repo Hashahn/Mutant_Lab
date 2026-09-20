@@ -1,4 +1,11 @@
 --!strict
+local RunService = nil
+if typeof(game) == "Instance" or typeof(game) == "table" then
+	pcall(function()
+		RunService = (game :: any):GetService("RunService")
+	end)
+end
+
 local RequestValidator = {}
 local function validId(value: any): boolean
 	return type(value) == "string" and #value > 0 and #value <= 64
@@ -6,6 +13,9 @@ end
 function RequestValidator.isValid(action: any, payload: any): boolean
 	if type(action) ~= "string" then
 		return false
+	end
+	if RunService and RunService:IsStudio() and action == "DebugSetupSquad" then
+		return true
 	end
 	if action == "CreateBlob" then
 		return payload == nil
@@ -24,19 +34,22 @@ function RequestValidator.isValid(action: any, payload: any): boolean
 		if type(payload.ActiveIds) ~= "table" or #payload.ActiveIds < 1 or #payload.ActiveIds > 3 then
 			return false
 		end
+		local seenIds = {}
 		for _, id in payload.ActiveIds do
-			if not validId(id) then
+			if not validId(id) or seenIds[id] then
 				return false
 			end
+			seenIds[id] = true
 		end
 		if payload.ReserveIds ~= nil then
 			if type(payload.ReserveIds) ~= "table" or #payload.ReserveIds > 3 then
 				return false
 			end
 			for _, id in payload.ReserveIds do
-				if not validId(id) then
+				if not validId(id) or seenIds[id] then
 					return false
 				end
+				seenIds[id] = true
 			end
 		end
 		-- Check no unexpected extra fields

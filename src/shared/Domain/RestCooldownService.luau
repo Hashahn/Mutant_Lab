@@ -74,7 +74,7 @@ function RestCooldownService.CompleteRest(
 		-- Select random existing gene to boost
 		local idx = math.clamp(math.floor(rand() * #genes) + 1, 1, #genes)
 		local boostVal = math.floor(rand() * 11) + 5 -- 5 to 15
-		genes[idx].Value += boostVal
+		genes[idx].Value = math.clamp(genes[idx].Value + boostVal, 1, 100)
 
 		bonus = {
 			Element = genes[idx].Element,

@@ -65,6 +65,7 @@ function workspaceMock:GetServerTimeNow()
 	return now
 end
 local profiles = {}
+local savedProfiles = {}
 local fakeData = { Mode = "MEMORY" }
 function fakeData:Load(player)
 	profiles[player] = GameState.newProfile(GameConfig)
@@ -74,6 +75,13 @@ function fakeData:Get(player)
 	return profiles[player]
 end
 function fakeData:Remove(player)
+	if profiles[player] then
+		savedProfiles[player] = profiles[player]
+		assert(
+			GameState.validateProfile(profiles[player], GameConfig, MutantConfig),
+			"Profile must pass validateProfile on save"
+		)
+	end
 	profiles[player] = nil
 end
 function fakeData:Start() end
@@ -199,6 +207,7 @@ assert(request(a, "StartBattle", { MutantId = toxic }).Ok)
 local pending = jobs[#jobs]
 
 -- Verify StartExpedition works on server for Player B
+now = 15
 assert(request(b, "CreateBlob", nil).Ok)
 local bMutant = profiles[b].Mutants[1].Id
 local expRes = request(b, "StartExpedition", {
@@ -211,14 +220,68 @@ assert(bSnap.Expedition ~= nil, "Expedition should be attached to snapshot")
 assert(bSnap.Expedition.InCombat == true, "Expedition should start in combat")
 assert(bSnap.Expedition.CurrentRoomIndex == 1, "Expedition should be at room 1")
 
+-- Verify busy locks for mutant in active expedition
+assert(
+	request(b, "StartBattle", { MutantId = bMutant }).Code == "MUTANT_BUSY",
+	"Mutant in expedition cannot battle"
+)
+assert(
+	request(b, "ReleaseMutant", { MutantId = bMutant }).Code == "MUTANT_BUSY",
+	"Mutant in expedition cannot release"
+)
+
+-- Anti-skip: cannot proceed or evacuate during combat
+assert(request(b, "ProceedNextRoom", nil).Code == "CANNOT_PROCEED", "Cannot skip combat via ProceedNextRoom")
+assert(request(b, "SecureLoot", nil).Code == "NOT_AT_TERMINAL", "Cannot secure loot in combat")
+assert(request(b, "Evacuate", nil).Code == "CANNOT_EVACUATE", "Cannot evacuate in combat")
+
 -- Verify BreedMutants works on server for Player B after expedition/creation
+now = 30
 assert(request(b, "CreateBlob", nil).Ok)
 assert(request(b, "CreateBlob", nil).Ok)
 local m1 = profiles[b].Mutants[2].Id
 local m2 = profiles[b].Mutants[3].Id
+
+-- Duplicate squad ID rejection
+local dupSquadRes = request(b, "StartExpedition", {
+	RoomCount = 3,
+	ActiveIds = { m1, m1 },
+})
+assert(
+	dupSquadRes.Code == "INVALID_REQUEST",
+	"Duplicate squad IDs in StartExpedition must be rejected with INVALID_REQUEST, got: "
+		.. tostring(dupSquadRes.Code)
+)
+
+-- Breeding target busy protection
+local breedBusyRes = request(b, "BreedMutants", { FirstId = bMutant, SecondId = m1 })
+assert(
+	breedBusyRes.Code == "MUTANT_BUSY",
+	"Mutant in expedition cannot breed, got: " .. tostring(breedBusyRes.Code)
+)
+
 local breedRes = request(b, "BreedMutants", { FirstId = m1, SecondId = m2 })
 assert(breedRes.Ok and breedRes.Code == "OK", "BreedMutants failed: " .. tostring(breedRes.Code))
 assert(#profiles[b].Mutants == 2, "Breeding must consume one mutant and keep survivor")
+assert(profiles[b].BreedingConsumedUnits == 1, "BreedingConsumedUnits must track consumed unit")
+assert(
+	GameState.validateProfile(profiles[b], GameConfig, MutantConfig),
+	"Profile with BreedingConsumedUnits must validate successfully"
+)
+
+-- Player C joins and leaves while in expedition: verify finalization and save validation
+local c = { UserId = 3, Parent = Players }
+function c:Kick(msg)
+	self.Kicked = msg
+end
+Players.PlayerAdded:Fire(c)
+assert(request(c, "CreateBlob", nil).Ok)
+local cMutant = profiles[c].Mutants[1].Id
+assert(request(c, "StartExpedition", { RoomCount = 3, ActiveIds = { cMutant } }).Ok)
+Players.PlayerRemoving:Fire(c)
+assert(savedProfiles[c] ~= nil, "Player C profile must be saved on leave")
+assert(profiles[c] == nil, "Player C profile cleaned up from active memory")
+
 Players.PlayerRemoving:Fire(a)
 now = 12
 pending.Callback(table.unpack(pending.Args))
