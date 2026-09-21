@@ -314,6 +314,7 @@ function UIController:_build()
 
 	local merge = makeButton(scroll, "MERGE SELECTED", COLORS.Purple)
 	merge.LayoutOrder = 8
+	merge.Visible = false
 	merge.Activated:Connect(function()
 		if not self._busy and #self._selected == 2 then
 			self:_playSound("Click")
@@ -322,7 +323,7 @@ function UIController:_build()
 	end)
 	self._merge = merge
 
-	local breedBtn = makeButton(scroll, "BREED SELECTED (DNA)", COLORS.Lime)
+	local breedBtn = makeButton(scroll, "BREED / EVOLVE (DNA)", COLORS.Lime)
 	breedBtn.LayoutOrder = 9
 	breedBtn.Activated:Connect(function()
 		if not self._busy and #self._selected == 2 then
@@ -338,9 +339,15 @@ function UIController:_build()
 	local battle = makeButton(scroll, "START TRAINING", COLORS.Orange)
 	battle.LayoutOrder = 10
 	battle.Activated:Connect(function()
-		if not self._busy and #self._selected == 1 then
-			self:_playSound("Click")
-			self._callbacks.OnAction("StartBattle", { MutantId = self._selected[1] })
+		if not self._busy then
+			if #self._selected == 1 then
+				self:_playSound("Click")
+				self._callbacks.OnAction("StartBattle", { MutantId = self._selected[1] })
+			elseif #self._selected == 0 then
+				self:ShowToast("Select a specimen above first, then start training.", COLORS.Orange)
+			else
+				self:ShowToast("Select exactly 1 specimen to train.", COLORS.Orange)
+			end
 		end
 	end)
 	self._battleButton = battle
@@ -1074,18 +1081,13 @@ function UIController:_tutorialHint()
 	local tutorial = self._state.Tutorial or {}
 	if not tutorial.FirstBlobCreated then
 		return "Step 1: Click CREATE BLOB to synthesize your first free specimen."
-	elseif not tutorial.FirstMergeCompleted then
-		if (tutorial.FreeBlobsClaimed or 0) < self._gameConfig.FreeTutorialBlobs then
-			return "Step 2: Click CREATE BLOB to synthesize your second specimen."
-		end
-		return "Step 2: Click BOTH Blob cards above to select them, then press MERGE SELECTED."
 	elseif not tutorial.TutorialCompleted then
 		if type(self._state.Battle) == "table" then
-			return "Training in progress! Watch the combat dummy in the chamber."
+			return "Training in progress! Watch the combat chamber."
 		end
-		return "Step 3: Select your Toxic Blob or Plasma Blob, then click START TRAINING."
+		return "Step 2: Select your specimen, then click START TRAINING."
 	end
-	return "Tutorial complete! Grow your collection, synthesize mutations and train mutants."
+	return "Tutorial complete! Grow your collection, breed mutations and explore expeditions."
 end
 
 function UIController:_pruneSelection()
@@ -1178,7 +1180,7 @@ function UIController:_refreshControls()
 	local count = if self._state then #(self._state.Mutants or {}) else 0
 	local slots = if self._state then (self._state.SlotsUnlocked or 0) else 0
 	setEnabled(self._create, ready and count < slots, COLORS.Cyan)
-	setEnabled(self._merge, ready and #self._selected == 2, COLORS.Purple)
+	self._merge.Visible = false
 	if self._breedBtn then
 		setEnabled(self._breedBtn, ready and #self._selected == 2, COLORS.Lime)
 	end

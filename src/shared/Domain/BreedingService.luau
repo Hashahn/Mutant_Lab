@@ -31,6 +31,8 @@ export type BreedingResult = {
 	InheritedGene: Gene?,
 	DisplacedGene: Gene?,
 	SurvivorWonOdds: number,
+	Evolved: boolean?,
+	NewTier: number?,
 	Log: string,
 }
 
@@ -170,11 +172,52 @@ function BreedingService.Breed(
 		end
 	end
 
+	-- Check for evolutionary gene thresholds
+	local maxedCount = 0
+	local maxedElements: { [string]: boolean } = {}
+	local totalGeneVal = 0
+	for _, g in survivorGenes do
+		totalGeneVal += g.Value
+		if g.Value >= 100 then
+			maxedCount += 1
+			maxedElements[g.Element] = true
+		end
+	end
+
+	local evolved = false
+	local newTier = survivorOriginal.Tier
+	local newType = survivorOriginal.Type
+
+	if survivorOriginal.Tier == 1 and maxedCount >= 2 then
+		evolved = true
+		newTier = 2
+		if maxedElements["Toxin"] then
+			newType = "ToxicBlob"
+		elseif maxedElements["Cryo"] then
+			newType = "CryoBlob"
+		elseif maxedElements["Electro"] then
+			newType = "ElectroBlob"
+		elseif maxedElements["Shadow"] then
+			newType = "ShadowBlob"
+		else
+			newType = "ToxicBlob"
+		end
+	elseif survivorOriginal.Tier == 2 and maxedCount >= 3 then
+		evolved = true
+		newTier = 3
+		newType = "PlasmaBlob"
+	end
+
+	local newLevel = math.clamp(math.floor(totalGeneVal / 25) + 1, 1, 20)
+	if newLevel < survivorOriginal.Level then
+		newLevel = survivorOriginal.Level
+	end
+
 	local updatedSurvivor: Mutant = {
 		Id = survivorOriginal.Id,
-		Type = survivorOriginal.Type,
-		Tier = survivorOriginal.Tier, -- Tier NEVER increases through breeding!
-		Level = survivorOriginal.Level,
+		Type = newType,
+		Tier = newTier,
+		Level = newLevel,
 		Role = survivorOriginal.Role,
 		Genes = survivorGenes,
 		RestUntil = survivorOriginal.RestUntil,
@@ -183,7 +226,7 @@ function BreedingService.Breed(
 	local logMsg = string.format(
 		"Breeding complete: %s (Tier %d) survived against %s (Tier %d) with %.0f%% survival odds.",
 		updatedSurvivor.Id,
-		updatedSurvivor.Tier,
+		survivorOriginal.Tier,
 		victimOriginal.Id,
 		victimOriginal.Tier,
 		survivorOdds * 100
@@ -195,6 +238,14 @@ function BreedingService.Breed(
 	if displacedGene then
 		logMsg ..= string.format(" Displaced %s (%d).", displacedGene.Element, displacedGene.Value)
 	end
+	if evolved then
+		logMsg ..= string.format(
+			" ★ EVOLUTION! Evolved to Tier %d (%s) at Level %d!",
+			newTier,
+			newType,
+			newLevel
+		)
+	end
 
 	return true,
 		{
@@ -204,6 +255,8 @@ function BreedingService.Breed(
 			InheritedGene = inheritedGene,
 			DisplacedGene = displacedGene,
 			SurvivorWonOdds = survivorOdds,
+			Evolved = evolved,
+			NewTier = if evolved then newTier else nil,
 			Log = logMsg,
 		},
 		nil

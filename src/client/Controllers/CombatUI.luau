@@ -92,7 +92,7 @@ function CombatUI.new(parentGui, callbacks)
 	camHint.Parent = topBar
 	addCorner(camHint, 5)
 
-	camHint.MouseButton1Click:Connect(function()
+	camHint.Activated:Connect(function()
 		if self.Callbacks.OnResetCamera then
 			self.Callbacks.OnResetCamera()
 		end
@@ -213,8 +213,8 @@ function CombatUI.new(parentGui, callbacks)
 	addCorner(logBanner, 6)
 	self.LogBanner = logBanner
 
-	executeBtn.MouseButton1Click:Connect(function()
-		if self.Callbacks.OnSelectAction then
+	executeBtn.Activated:Connect(function()
+		if self.Callbacks.OnSelectAction and self.CurrentTurnUnitId then
 			self.Callbacks.OnSelectAction(
 				self.SelectedAbilityType or "Basic",
 				self.SelectedTargetId,
@@ -289,7 +289,7 @@ function CombatUI.new(parentGui, callbacks)
 	secureBtn.Text = "SECURE CURRENT LOOT"
 	secureBtn.Parent = terminalPanel
 	addCorner(secureBtn, 8)
-	secureBtn.MouseButton1Click:Connect(function()
+	secureBtn.Activated:Connect(function()
 		if self.Callbacks.OnSecureLoot then
 			self.Callbacks.OnSecureLoot()
 		end
@@ -305,7 +305,7 @@ function CombatUI.new(parentGui, callbacks)
 	evacBtn.Text = "EVACUATE (EXIT)"
 	evacBtn.Parent = terminalPanel
 	addCorner(evacBtn, 8)
-	evacBtn.MouseButton1Click:Connect(function()
+	evacBtn.Activated:Connect(function()
 		if self.Callbacks.OnEvacuate then
 			self.Callbacks.OnEvacuate()
 		end
@@ -321,7 +321,7 @@ function CombatUI.new(parentGui, callbacks)
 	nextBtn.Text = "PROCEED NEXT ROOM"
 	nextBtn.Parent = terminalPanel
 	addCorner(nextBtn, 8)
-	nextBtn.MouseButton1Click:Connect(function()
+	nextBtn.Activated:Connect(function()
 		if self.Callbacks.OnNextRoom then
 			self.Callbacks.OnNextRoom()
 		end
@@ -534,38 +534,16 @@ function CombatUI:UpdateCombat(combatState, expeditionSnapshot)
 	local isPlayerTurn = activeUnit ~= nil
 	local selectedAbility: CombatTypes.Ability? = nil
 
-	if activeUnit and isPlayerTurn then
+	if activeUnit then
 		for _, ability in activeUnit.Abilities do
 			if ability.Type == self.SelectedAbilityType then
 				selectedAbility = ability
+				break
 			end
-			local canAfford = playerEnergy >= ability.EnergyCost
-			local onCd = (activeUnit.Cooldowns[ability.Name] or 0) > 0
-
-			local btn = Instance.new("TextButton")
-			btn.Size = UDim2.new(0, 130, 0, 48)
-			btn.BackgroundColor3 = if canAfford and not onCd then COLORS.Card else COLORS.Disabled
-			btn.Font = Enum.Font.GothamBold
-			btn.TextSize = 12
-			btn.TextColor3 = COLORS.Text
-
-			local isSelected = self.SelectedAbilityType == ability.Type
-			if isSelected then
-				addStroke(btn, COLORS.Lime, 2)
-			end
-			addCorner(btn, 8)
-
-			local cdText = if onCd then string.format(" [CD:%d]", activeUnit.Cooldowns[ability.Name]) else ""
-			btn.Text =
-				string.format("%s\n[%s ⚡%d%s]", ability.Name, ability.Type, ability.EnergyCost, cdText)
-			btn.Parent = self.AbilitiesContainer
-
-			btn.MouseButton1Click:Connect(function()
-				if canAfford and not onCd then
-					self.SelectedAbilityType = ability.Type
-					self:UpdateCombat(combatState, expeditionSnapshot)
-				end
-			end)
+		end
+		if not selectedAbility and #activeUnit.Abilities > 0 then
+			selectedAbility = activeUnit.Abilities[1]
+			self.SelectedAbilityType = selectedAbility.Type
 		end
 	end
 
@@ -593,6 +571,86 @@ function CombatUI:UpdateCombat(combatState, expeditionSnapshot)
 
 	if self.Callbacks and self.Callbacks.OnTargetSelected and self.SelectedTargetId then
 		self.Callbacks.OnTargetSelected(self.SelectedTargetId)
+	end
+
+	-- Update Abilities
+	for _, child in self.AbilitiesContainer:GetChildren() do
+		if child:IsA("TextButton") then
+			child:Destroy()
+		end
+	end
+
+	if activeUnit and isPlayerTurn then
+		for _, ability in activeUnit.Abilities do
+			local canAfford = playerEnergy >= ability.EnergyCost
+			local onCd = (activeUnit.Cooldowns[ability.Name] or 0) > 0
+			local isSelected = self.SelectedAbilityType == ability.Type
+			local isClickable = isPlayerTurn and canAfford and not onCd
+
+			local btn = Instance.new("TextButton")
+			btn.Size = UDim2.new(0, 130, 0, 48)
+			btn.Active = isClickable
+			btn.AutoButtonColor = isClickable
+			btn.BackgroundColor3 = if isClickable
+				then (if isSelected then COLORS.PanelSoft else COLORS.Card)
+				else COLORS.Disabled
+			btn.Font = Enum.Font.GothamBold
+			btn.TextSize = 12
+			btn.TextColor3 = if isClickable then COLORS.Text else COLORS.Muted
+			btn.TextTransparency = if isClickable then 0 else 0.4
+
+			btn.Name = ability.Type .. "Button"
+			if isSelected then
+				addStroke(btn, COLORS.Lime, 2)
+			end
+			addCorner(btn, 8)
+
+			local cdText = if onCd then string.format(" [CD:%d]", activeUnit.Cooldowns[ability.Name]) else ""
+			btn.Text =
+				string.format("%s\n[%s ⚡%d%s]", ability.Name, ability.Type, ability.EnergyCost, cdText)
+			btn.Parent = self.AbilitiesContainer
+
+			btn.Activated:Connect(function()
+				if not canAfford or onCd or not isPlayerTurn then
+					return
+				end
+				self.SelectedAbilityType = ability.Type
+
+				-- Determine target for this ability
+				local abilityIsAlly = ability.TargetType == "SingleAlly"
+				local abilityIsSelf = ability.TargetType == "Self"
+				local validTargets = if abilityIsAlly
+					then combatState.PlayerTeam.Active
+					else combatState.EnemyTeam.Active
+
+				local effectiveTargetId = self.SelectedTargetId
+				if abilityIsSelf then
+					effectiveTargetId = self.CurrentTurnUnitId
+				else
+					local isValid = false
+					for _, u in validTargets do
+						if u.IsAlive and u.CurrentHp > 0 and u.Id == effectiveTargetId then
+							isValid = true
+							break
+						end
+					end
+					if not isValid then
+						for _, u in validTargets do
+							if u.IsAlive and u.CurrentHp > 0 then
+								effectiveTargetId = u.Id
+								self.SelectedTargetId = u.Id
+								break
+							end
+						end
+					end
+				end
+
+				-- Immediately execute turn with chosen ability and target!
+				if self.Callbacks.OnSelectAction and self.CurrentTurnUnitId then
+					self.Callbacks.OnSelectAction(ability.Type, effectiveTargetId, self.CurrentTurnUnitId)
+				end
+			end)
+		end
 	end
 
 	-- Update Targets
@@ -673,10 +731,10 @@ function CombatUI:UpdateCombat(combatState, expeditionSnapshot)
 					)
 
 					if mult > 1.0 then
-						multLbl.TextColor3 = COLORS.Red
+						multLbl.TextColor3 = COLORS.Lime
 						multLbl.Text = string.format("⚔ %.1fx WEAK", mult)
 					elseif mult < 1.0 then
-						multLbl.TextColor3 = COLORS.Cyan
+						multLbl.TextColor3 = COLORS.Red
 						multLbl.Text = string.format("🛡 %.2fx RESIST", mult)
 					else
 						multLbl.TextColor3 = COLORS.Muted
@@ -691,8 +749,11 @@ function CombatUI:UpdateCombat(combatState, expeditionSnapshot)
 			selectBtn.BackgroundTransparency = 1
 			selectBtn.Text = ""
 			selectBtn.Parent = card
-			selectBtn.MouseButton1Click:Connect(function()
+			selectBtn.Activated:Connect(function()
 				self.SelectedTargetId = targetUnit.Id
+				if self.Callbacks and self.Callbacks.OnTargetSelected then
+					self.Callbacks.OnTargetSelected(targetUnit.Id)
+				end
 				self:UpdateCombat(combatState, expeditionSnapshot)
 			end)
 		end

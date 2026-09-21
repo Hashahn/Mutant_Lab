@@ -25,11 +25,46 @@ local function isActiveBattle(battle: any): boolean
 	return type(battle) == "table" and battle.Consumed ~= true
 end
 
-function GameRules.new(gameConfig: any, mutantConfig: any, makeId: () -> string): any
+local ALL_STARTER_ELEMENTS = { "Biomass", "Cryo", "Electro", "Toxin", "Shadow", "Plasma" }
+local STARTER_GENE_VALUES = { 40, 30, 20 }
+
+local function getRandomInt(rng: (() -> number)?, max: number): number
+	if rng then
+		local val = rng()
+		if val >= 1 and val % 1 == 0 then
+			return math.clamp(val, 1, max)
+		end
+		return math.clamp(math.floor(val * max) + 1, 1, max)
+	end
+	return math.random(1, max)
+end
+
+local function generateStarterGenes(rng: (() -> number)?): { { Element: string, Value: number } }
+	local elements = table.clone(ALL_STARTER_ELEMENTS)
+	for i = #elements, 2, -1 do
+		local j = getRandomInt(rng, i)
+		elements[i], elements[j] = elements[j], elements[i]
+	end
+
+	local values = table.clone(STARTER_GENE_VALUES)
+	for i = #values, 2, -1 do
+		local j = getRandomInt(rng, i)
+		values[i], values[j] = values[j], values[i]
+	end
+
+	return {
+		{ Element = elements[1], Value = values[1] },
+		{ Element = elements[2], Value = values[2] },
+		{ Element = elements[3], Value = values[3] },
+	}
+end
+
+function GameRules.new(gameConfig: any, mutantConfig: any, makeId: () -> string, rng: (() -> number)?): any
 	return setmetatable({
 		_gameConfig = gameConfig,
 		_mutantConfig = mutantConfig,
 		_makeId = makeId,
+		_rng = rng,
 		_battleSequence = 0,
 	}, GameRules)
 end
@@ -104,11 +139,7 @@ function GameRules:CreateBlob(profile: any, _battle: any): (boolean, string)
 		Tier = definition.Tier,
 		Level = 1,
 		Role = "Striker",
-		Genes = {
-			{ Element = "Biomass", Value = 25 },
-			{ Element = "Plasma", Value = 20 },
-			{ Element = "Cryo", Value = 10 },
-		},
+		Genes = generateStarterGenes(self._rng),
 	})
 
 	return true, "OK"
@@ -177,7 +208,7 @@ function GameRules:StartBattle(profile: any, battle: any, mutantId: any, now: an
 	if isActiveBattle(battle) then
 		return false, "BATTLE_RUNNING", nil
 	end
-	if not profile.Tutorial.FirstMergeCompleted then
+	if not profile.Tutorial.FirstBlobCreated then
 		return false, "TUTORIAL_REQUIRED", nil
 	end
 	if not isFiniteNumber(now) then
@@ -187,13 +218,6 @@ function GameRules:StartBattle(profile: any, battle: any, mutantId: any, now: an
 	local _, mutant = findMutant(profile, mutantId)
 	if mutant == nil then
 		return false, "MUTANT_NOT_FOUND", nil
-	end
-	if
-		not profile.Tutorial.TutorialCompleted
-		and mutant.Type ~= "ToxicBlob"
-		and mutant.Type ~= "PlasmaBlob"
-	then
-		return false, "TUTORIAL_REQUIRED", nil
 	end
 	local definition = self._mutantConfig[mutant.Type]
 	if type(definition) ~= "table" or not isFiniteNumber(definition.BattleReward) then
@@ -247,9 +271,7 @@ function GameRules:CompleteBattle(profile: any, battle: any, now: any): (boolean
 	battle.Consumed = true
 	profile.BioCoins += reward
 	profile.Tutorial.FirstBattleCompleted = true
-	if mutant.Type == "ToxicBlob" or mutant.Type == "PlasmaBlob" then
-		profile.Tutorial.TutorialCompleted = true
-	end
+	profile.Tutorial.TutorialCompleted = true
 
 	return true, "OK", reward
 end

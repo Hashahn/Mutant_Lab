@@ -163,7 +163,7 @@ local function snapshot(player)
 	end
 	checkAndUpdateRests(profile, os.time())
 	local snap = GameState.snapshot(profile, session.Battle, session.Revision, data.Mode)
-	if session.Expedition then
+	if session.Expedition and not session.Expedition.Finalized then
 		snap.Expedition = session.Expedition:GetSnapshot()
 		snap.Expedition.CurrentCombat = session.Expedition.CurrentCombat
 	end
@@ -454,16 +454,29 @@ requestAction.OnServerInvoke = function(player, action, payload)
 			if breedOk and breedRes then
 				local consumedId = breedRes.ConsumedId
 				local removeIndex = findMutant(profile, consumedId)
+				local consumedTier = 1
 				if removeIndex then
 					local consumed = profile.Mutants[removeIndex]
-					profile.BreedingConsumedUnits = (profile.BreedingConsumedUnits or 0)
-						+ 2 ^ (consumed.Tier - 1)
+					consumedTier = consumed.Tier
 					table.remove(profile.Mutants, removeIndex)
 				end
 				local survivorId = breedRes.Survivor.Id
 				local _, survivor = findMutant(profile, survivorId)
 				if survivor then
+					local oldTier = survivor.Tier
 					survivor.Genes = breedRes.Survivor.Genes
+					survivor.Tier = breedRes.Survivor.Tier
+					survivor.Type = breedRes.Survivor.Type
+					survivor.Level = breedRes.Survivor.Level
+
+					local tierGainUnits = (2 ^ (survivor.Tier - 1)) - (2 ^ (oldTier - 1))
+					local consumedUnits = 2 ^ (consumedTier - 1)
+					local netConsumedDelta = math.max(0, consumedUnits - tierGainUnits)
+					profile.BreedingConsumedUnits = (profile.BreedingConsumedUnits or 0) + netConsumedDelta
+
+					if breedRes.Evolved or survivor.Tier > 1 then
+						profile.Tutorial.FirstMergeCompleted = true
+					end
 				end
 				ok = true
 				code = "OK"

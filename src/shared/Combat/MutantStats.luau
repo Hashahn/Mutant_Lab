@@ -72,7 +72,12 @@ function MutantStats.CalculateEffectiveElements(tier: number, genes: { Gene }): 
 	}
 end
 
-function MutantStats.CalculateStats(tier: number, genes: { Gene }, role: CombatRole?): CalculatedStats
+function MutantStats.CalculateStats(
+	tier: number,
+	genes: { Gene },
+	role: CombatRole?,
+	level: number?
+): CalculatedStats
 	local effectiveElements = MutantStats.CalculateEffectiveElements(tier, genes)
 	local sorted = sortGenes(genes)
 
@@ -112,6 +117,14 @@ function MutantStats.CalculateStats(tier: number, genes: { Gene }, role: CombatR
 	local secondaryGeneVal = if #sorted > 1 then sorted[2].Value else 0
 	local attackBonus = math.floor(primaryGeneVal * 0.5 + secondaryGeneVal * 0.25)
 	local attack = baseAttack + attackBonus
+
+	-- Level multiplier (+6% HP and Attack per level above 1)
+	local lvl = math.max(1, level or 1)
+	if lvl > 1 then
+		local levelMultiplier = 1 + (lvl - 1) * 0.06
+		maxHp = math.floor(maxHp * levelMultiplier)
+		attack = math.floor(attack * levelMultiplier)
+	end
 
 	-- Role modifiers
 	local assignedRole = role or "Striker"

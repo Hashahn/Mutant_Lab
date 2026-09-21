@@ -93,6 +93,20 @@ local profile = GameState.newProfile(GameConfig)
 local ok, code = rules:CreateBlob(profile, false)
 expect(ok and code == "OK", "first free Blob failed")
 expect(profile.BioCoins == GameConfig.StartingBioCoins, "first free Blob charged coins")
+local firstBlob = profile.Mutants[1]
+expect(firstBlob.Genes ~= nil and #firstBlob.Genes == 3, "first Blob must have 3 genes")
+local starterVals = {}
+local starterElemMap = {}
+for _, g in ipairs(firstBlob.Genes) do
+	expect(not starterElemMap[g.Element], "gene elements must be distinct")
+	starterElemMap[g.Element] = true
+	table.insert(starterVals, g.Value)
+end
+table.sort(starterVals)
+expect(
+	starterVals[1] == 20 and starterVals[2] == 30 and starterVals[3] == 40,
+	"starter gene ratio must be 20/30/40"
+)
 ok, code = rules:CreateBlob(profile, false)
 expect(ok and code == "OK", "second free Blob failed")
 expect(profile.Tutorial.FreeBlobsClaimed == 2, "free create count not persisted")
@@ -163,8 +177,10 @@ end
 expect(plasmaTutorialProfile.BioCoins == 0, "four tutorial creates must spend all starting coins")
 ok, code = plasmaTutorialRules:Merge(plasmaTutorialProfile, false, "id-1", "id-2")
 expect(ok and code == "OK", "first plasma tutorial merge failed")
-ok, code = plasmaTutorialRules:StartBattle(plasmaTutorialProfile, false, "id-3", 600)
-expectCode(ok, code, "TUTORIAL_REQUIRED")
+local unstartedProfile = GameState.newProfile(GameConfig)
+local unstartedRules = newRules()
+local unstartedOk, unstartedCode = unstartedRules:StartBattle(unstartedProfile, false, "id-1", 600)
+expectCode(unstartedOk, unstartedCode, "TUTORIAL_REQUIRED")
 ok, code = plasmaTutorialRules:Merge(plasmaTutorialProfile, false, "id-3", "id-4")
 expect(ok and code == "OK", "second plasma tutorial merge failed")
 ok, code = plasmaTutorialRules:Merge(plasmaTutorialProfile, false, "id-5", "id-6")
@@ -191,13 +207,18 @@ local duplicatePlasmaOk, duplicatePlasmaCode =
 expectCode(duplicatePlasmaOk, duplicatePlasmaCode, "INVALID_REQUEST")
 expect(plasmaTutorialProfile.BioCoins == 85, "PlasmaBlob tutorial battle rewarded twice")
 
--- Battle is transient, enforces the tutorial order, and rewards exactly once.
-local gatedProfile = GameState.newProfile(GameConfig)
-local gatedRules = newRules()
-gatedRules:CreateBlob(gatedProfile, false)
+-- Battle is transient, allows starting training with the first Blob, and rewards exactly once.
+local starterProfile = GameState.newProfile(GameConfig)
+local starterRules = newRules()
+starterRules:CreateBlob(starterProfile, false)
 local battle
-ok, code, battle = gatedRules:StartBattle(gatedProfile, false, "id-1", 10)
-expectCode(ok, code, "TUTORIAL_REQUIRED")
+ok, code, battle = starterRules:StartBattle(starterProfile, false, "id-1", 10)
+expect(ok and code == "OK" and type(battle) == "table", "starter blob battle failed to start")
+expect(starterProfile.Tutorial.FirstBattleStarted, "FirstBattleStarted tutorial flag missing")
+local starterFinishOk, starterFinishCode = starterRules:CompleteBattle(starterProfile, battle, 16)
+expect(starterFinishOk and starterFinishCode == "OK", "starter blob battle completion failed")
+expect(starterProfile.Tutorial.FirstBattleCompleted, "FirstBattleCompleted flag missing")
+expect(starterProfile.Tutorial.TutorialCompleted, "TutorialCompleted flag missing after first battle")
 
 local toxicId = mergeProfile.Mutants[1].Id
 ok, code, battle = mergeRules:StartBattle(mergeProfile, false, toxicId, 100)

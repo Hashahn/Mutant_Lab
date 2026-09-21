@@ -311,7 +311,8 @@ function GameState.validateProfile(profile: any, gameConfig: any, mutantConfig: 
 			not isInteger(mutant.Tier)
 			or mutant.Tier < 1
 			or not isInteger(mutant.Level)
-			or mutant.Level ~= 1
+			or mutant.Level < 1
+			or mutant.Level > 20
 		then
 			return false
 		end
@@ -348,7 +349,12 @@ function GameState.validateProfile(profile: any, gameConfig: any, mutantConfig: 
 		end
 		if mutant.Type == "Blob" then
 			acquisitionUnits += 1
-		elseif mutant.Type == "ToxicBlob" then
+		elseif
+			mutant.Type == "ToxicBlob"
+			or mutant.Type == "CryoBlob"
+			or mutant.Type == "ElectroBlob"
+			or mutant.Type == "ShadowBlob"
+		then
 			acquisitionUnits += 2
 			hasToxicBlob = true
 		elseif mutant.Type == "PlasmaBlob" then
@@ -406,7 +412,7 @@ function GameState.validateProfile(profile: any, gameConfig: any, mutantConfig: 
 	if tutorial.FirstMergeCompleted and (not tutorial.FirstBlobCreated or tutorial.FreeBlobsClaimed < 2) then
 		return false
 	end
-	if tutorial.FirstBattleStarted and not tutorial.FirstMergeCompleted then
+	if tutorial.FirstBattleStarted and not tutorial.FirstBlobCreated then
 		return false
 	end
 	if tutorial.FirstBattleCompleted and not tutorial.FirstBattleStarted then
@@ -418,7 +424,7 @@ function GameState.validateProfile(profile: any, gameConfig: any, mutantConfig: 
 	if tutorial.TutorialCompleted and not tutorial.FirstBattleCompleted then
 		return false
 	end
-	if not tutorial.FirstMergeCompleted and hasToxicBlob then
+	if not tutorial.TutorialCompleted and not tutorial.FirstMergeCompleted and hasToxicBlob then
 		return false
 	end
 

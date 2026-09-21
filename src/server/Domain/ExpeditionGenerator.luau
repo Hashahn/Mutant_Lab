@@ -19,7 +19,14 @@ local ExpeditionGenerator = {}
 
 local function generateEnemySquad(difficulty: number, rng: () -> number): SquadInput
 	local activeUnits: { CombatTypes.UnitInput } = {}
-	local count = if difficulty >= 3 then 3 else (if difficulty == 2 then 2 else 1)
+	local count: number
+	if difficulty == 1 then
+		count = 1
+	elseif difficulty == 2 then
+		count = if rng() > 0.5 then 2 else 1
+	else
+		count = 2
+	end
 
 	local roles: { CombatTypes.CombatRole } = { "Striker", "Guardian", "Controller", "Buffer" }
 	local elements: { CombatTypes.Element } = { "Plasma", "Cryo", "Electro", "Toxin", "Shadow", "Biomass" }
@@ -29,8 +36,24 @@ local function generateEnemySquad(difficulty: number, rng: () -> number): SquadI
 		local elem1 = elements[math.clamp(math.floor(rng() * #elements) + 1, 1, #elements)]
 		local elem2 = elements[math.clamp(math.floor(rng() * #elements) + 1, 1, #elements)]
 
-		local tier = if difficulty >= 4 and i == 1 then 3 else (if difficulty >= 2 then 2 else 1)
-		local geneVal = 20 + difficulty * 15
+		local tier = 1
+		local geneVal = 10
+		if difficulty == 1 then
+			tier = 1
+			geneVal = 10
+		elseif difficulty == 2 then
+			tier = 1
+			geneVal = 18
+		elseif difficulty == 3 then
+			tier = 1
+			geneVal = 25
+		elseif difficulty == 4 then
+			tier = if i == 1 then 2 else 1
+			geneVal = if i == 1 then 35 else 20
+		elseif difficulty >= 5 then
+			tier = 2
+			geneVal = if i == 1 then 50 else 32
+		end
 
 		table.insert(activeUnits, {
 			Id = string.format("enemy_d%d_%d", difficulty, i),
@@ -39,7 +62,7 @@ local function generateEnemySquad(difficulty: number, rng: () -> number): SquadI
 			Role = role,
 			Genes = {
 				{ Element = elem1, Value = geneVal },
-				{ Element = elem2, Value = math.floor(geneVal * 0.7) },
+				{ Element = elem2, Value = math.max(1, math.floor(geneVal * 0.65)) },
 			},
 		})
 	end

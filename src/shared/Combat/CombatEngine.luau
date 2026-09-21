@@ -43,7 +43,7 @@ export type EngineOptions = {
 }
 
 function CombatEngine.CreateUnit(input: UnitInput): CombatUnit
-	local stats = MutantStats.CalculateStats(input.Tier, input.Genes, input.Role)
+	local stats = MutantStats.CalculateStats(input.Tier, input.Genes, input.Role, input.Level)
 	local abilities = MutantStats.BuildAbilities(input.Tier, input.Role, stats)
 
 	return {
@@ -129,8 +129,18 @@ local function buildInitiativeQueue(playerTeam: TeamState, enemyTeam: TeamState)
 		end
 	end
 
+	local playerUnitIds: { [string]: boolean } = {}
+	for _, u in playerTeam.Active do
+		playerUnitIds[u.Id] = true
+	end
+
 	table.sort(allLiving, function(a, b)
 		if a.Stats.Speed == b.Stats.Speed then
+			local aIsPlayer = playerUnitIds[a.Id] == true
+			local bIsPlayer = playerUnitIds[b.Id] == true
+			if aIsPlayer ~= bIsPlayer then
+				return aIsPlayer
+			end
 			return a.Id < b.Id
 		end
 		return a.Stats.Speed > b.Stats.Speed

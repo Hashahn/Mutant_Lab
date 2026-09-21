@@ -211,4 +211,124 @@ assert(
 	"Profile with BreedingConsumedUnits must validate successfully"
 )
 
-print("PASS breeding: survival odds, inheritance, displacement, tier invariants, and rest cooldowns verified")
+-- 10. Test Evolution from Tier 1 to Tier 2 when 2 genes reach 100
+local t1Candidate: Mutant = {
+	Id = "t1_evolving",
+	Type = "Blob",
+	Tier = 1,
+	Level = 1,
+	Genes = {
+		{ Element = "Biomass", Value = 100 },
+		{ Element = "Cryo", Value = 95 },
+	},
+}
+local donorCryo: Mutant = {
+	Id = "donor_cryo_max",
+	Type = "Blob",
+	Tier = 1,
+	Level = 1,
+	Genes = {
+		{ Element = "Cryo", Value = 50 },
+	},
+}
+local evoOk, evoRes = BreedingService.Breed(t1Candidate, donorCryo, {
+	Rng = function()
+		return 0.0 -- t1Candidate wins, picks Cryo
+	end,
+	TransferRatio = 0.5,
+})
+assert(evoOk and evoRes ~= nil)
+assert(evoRes.Evolved == true, "Must flag as evolved")
+assert(evoRes.NewTier == 2, "Must evolve to Tier 2")
+assert(evoRes.Survivor.Tier == 2, "Survivor Tier must be 2")
+assert(evoRes.Survivor.Type == "CryoBlob", "Species must be CryoBlob since Cryo reached 100")
+assert(evoRes.Survivor.Level >= 2, "Level should scale with total gene points")
+
+-- Test ToxicBlob evolution
+local t1ToxinCandidate: Mutant = {
+	Id = "t1_toxin",
+	Type = "Blob",
+	Tier = 1,
+	Level = 1,
+	Genes = {
+		{ Element = "Biomass", Value = 100 },
+		{ Element = "Toxin", Value = 95 },
+	},
+}
+local donorToxin: Mutant = {
+	Id = "donor_toxin",
+	Type = "Blob",
+	Tier = 1,
+	Level = 1,
+	Genes = {
+		{ Element = "Toxin", Value = 50 },
+	},
+}
+local toxOk, toxRes = BreedingService.Breed(t1ToxinCandidate, donorToxin, {
+	Rng = function()
+		return 0.0
+	end,
+	TransferRatio = 0.5,
+})
+assert(toxOk and toxRes ~= nil)
+assert(toxRes.Survivor.Type == "ToxicBlob", "Must evolve to ToxicBlob when Toxin is maxed")
+
+-- 11. Test Evolution from Tier 2 to Tier 3 when 3 genes reach 100
+local t2Candidate: Mutant = {
+	Id = "t2_evolving",
+	Type = "CryoBlob",
+	Tier = 2,
+	Level = 5,
+	Genes = {
+		{ Element = "Biomass", Value = 100 },
+		{ Element = "Cryo", Value = 100 },
+		{ Element = "Electro", Value = 90 },
+	},
+}
+local donorElectro: Mutant = {
+	Id = "donor_electro",
+	Type = "Blob",
+	Tier = 1,
+	Level = 1,
+	Genes = {
+		{ Element = "Electro", Value = 50 },
+	},
+}
+local pOk, pRes = BreedingService.Breed(t2Candidate, donorElectro, {
+	Rng = function()
+		return 0.0
+	end,
+	TransferRatio = 0.5,
+})
+assert(pOk and pRes ~= nil)
+assert(pRes.Evolved == true, "Must evolve to Tier 3")
+assert(pRes.Survivor.Tier == 3, "Tier must be 3")
+assert(pRes.Survivor.Type == "PlasmaBlob", "Tier 3 species must be PlasmaBlob")
+
+-- 12. Validate profile with evolved mutants and higher levels
+local evolvedProfile = GameState.newProfile(GameConfig)
+evolvedProfile.Tutorial.Started = true
+evolvedProfile.Tutorial.FirstBlobCreated = true
+evolvedProfile.Tutorial.FirstMergeCompleted = true
+evolvedProfile.Tutorial.FreeBlobsClaimed = 2
+evolvedProfile.Mutants = {
+	{
+		Id = "evolved_cryo",
+		Type = "CryoBlob",
+		Tier = 2,
+		Level = 5,
+		Genes = {
+			{ Element = "Biomass", Value = 100 },
+			{ Element = "Cryo", Value = 100 },
+		},
+	},
+}
+evolvedProfile.BreedingConsumedUnits = 0 -- absorbed into Tier 2 (2 units total)
+assert(
+	GameState.validateProfile(evolvedProfile, GameConfig, MutantConfig) == true,
+	"Profile with Tier 2 CryoBlob at Level 5 must validate successfully"
+)
+
+print(
+	"PASS breeding: survival odds, inheritance, displacement, gene evolution, tier invariants, and rest cooldowns verified"
+)
